@@ -164,7 +164,7 @@
       <p>Sleeper's read API is public, so the usual cause is your browser blocking a request made from a double-clicked file (a <code>file://</code> address). Two fixes:</p>
       <p><b>Easiest:</b> run it from a local server so the address becomes <code>http://localhost</code>. Put this file in a folder, open a terminal there, and run<br>
          <code>python -m http.server 8000</code><br>
-         then open <code>http://localhost:8000/Nadoes_Season_Tracker.html</code>.</p>
+         then open <code>http://localhost:8000/</code>.</p>
       <p><b>Check the league is public:</b> open <code>https://api.sleeper.app/v1/league/1391256159565930496</code> in a browser tab. If you see JSON, the API is reachable and the issue is the origin rule above.</p>
       <p>The exact error appears in the status line on the Projections tab and in the browser console (F12). Paste it back to me if it sticks.</p>
     </div>
