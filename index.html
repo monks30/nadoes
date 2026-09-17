@@ -286,7 +286,7 @@
       });
     });
 
-    return { teams, byRid, playoffTeams, leagueAverageMatch, divisions, hasDivisions:divisions>=2, matchups,
+    return { teams, byRid, playoffTeams, leagueAverageMatch, divisions, hasDivisions:divisions>=2, matchups, rosterPositions:(league.roster_positions||[]),
              regWeeks, completedWeeks, remainingWeeks, scoresByWeek, schedule, scheduleGaps,
              played, leagueMean, leagueName: league.name || "League", season: league.season || "" };
   }
@@ -430,7 +430,7 @@
   }
 
   // ---------- render ----------
-  let STATE=null; let PLAYERS=null; let SCORING_RENDERED=false; let selectedScoringRid=null;
+  let STATE=null; let SCORING_RENDERED=false; let selectedScoringRid=null;
   function mineMatch(name){ const m=$("myTeam").value.trim().toLowerCase(); return m && name.toLowerCase().includes(m); }
 
   function renderProjInputs(state, cfg){
@@ -562,13 +562,25 @@
   }
 
   // ---------- scoring / position radar ----------
-  async function getPlayers(){
-    const res = await fetch(BASE+"/players/nfl");
-    if(!res.ok) throw new Error("HTTP "+res.status+" on /players/nfl");
-    return res.json();
+  const POS_ORDER=["QB","RB","WR","TE","FLEX","K","DEF"];
+  function slotBucket(code){
+    if(code==="QB") return "QB";
+    if(code==="RB") return "RB";
+    if(code==="WR") return "WR";
+    if(code==="TE") return "TE";
+    if(code==="K") return "K";
+    if(code==="DEF"||code==="DST") return "DEF";
+    if(String(code).indexOf("FLEX")>=0) return "FLEX";
+    return null;
+  }
+  function startingBuckets(state){
+    const skip={BN:1,IR:1,TAXI:1};
+    return (state.rosterPositions||[]).filter(c=>!skip[c]).map(slotBucket);
   }
   function computePositionPoints(state){
-    const POS=["QB","RB","WR","TE","K","DEF"];
+    const slots=startingBuckets(state);
+    const present=POS_ORDER.filter(p=>slots.indexOf(p)>=0);
+    const POS = present.length?present:POS_ORDER;
     const raw={}; state.teams.forEach(t=>{ raw[t.rid]={}; POS.forEach(p=>raw[t.rid][p]=0); });
     (state.completedWeeks||[]).forEach(w=>{
       const rows=(state.matchups&&state.matchups[w])||[];
@@ -576,24 +588,15 @@
         const rid=row.roster_id; if(!raw[rid]) return;
         const starters=row.starters||[]; const sp=row.starters_points; const pp=row.players_points||{};
         starters.forEach((pid,idx)=>{
-          if(!pid||pid==="0") return;
-          let pos=null; const info=PLAYERS?PLAYERS[pid]:null;
-          if(info&&info.position) pos=info.position;
-          else if(/^[A-Za-z]{2,4}$/.test(String(pid))) pos="DEF";
-          if(!pos||POS.indexOf(pos)<0) return;
-          const pts=(Array.isArray(sp)&&sp[idx]!=null)?sp[idx]:(pp[pid]!=null?pp[pid]:0);
-          raw[rid][pos]+=Number(pts)||0;
+          const bucket=slots[idx]; if(!bucket||!(bucket in raw[rid])) return;
+          const pts=(Array.isArray(sp)&&sp[idx]!=null)?sp[idx]:((pid&&pp[pid]!=null)?pp[pid]:0);
+          raw[rid][bucket]+=Number(pts)||0;
         });
       });
     });
     const index={}; state.teams.forEach(t=>index[t.rid]={});
-    POS.forEach(p=>{
-      state.teams.forEach(t=>{
-        let sum=0,cnt=0; state.teams.forEach(o=>{ if(o.rid!==t.rid){ sum+=raw[o.rid][p]; cnt++; } });
-        const avg=cnt?sum/cnt:0;
-        index[t.rid][p]= avg>0 ? raw[t.rid][p]/avg*100 : (raw[t.rid][p]>0?200:null);
-      });
-    });
+    POS.forEach(p=>{ state.teams.forEach(t=>{ let sum=0,cnt=0; state.teams.forEach(o=>{ if(o.rid!==t.rid){ sum+=raw[o.rid][p]; cnt++; } });
+      const avg=cnt?sum/cnt:0; index[t.rid][p]= avg>0 ? raw[t.rid][p]/avg*100 : (raw[t.rid][p]>0?200:null); }); });
     const teams=state.teams.map(t=>({rid:t.rid,name:t.name,total:POS.reduce((a,p)=>a+raw[t.rid][p],0)}));
     let gmax=100; state.teams.forEach(t=>POS.forEach(p=>{ const v=index[t.rid][p]; if(v!=null&&v>gmax) gmax=v; }));
     return {POS,raw,index,teams,gmax};
@@ -611,7 +614,7 @@
       spokes+='<line class="radar-grid" x1="'+cx+'" y1="'+cy+'" x2="'+e[0].toFixed(1)+'" y2="'+e[1].toFixed(1)+'"></line>';
       const L=pt(i,R+15); const anchor=Math.abs(L[0]-cx)<6?"middle":(L[0]>cx?"start":"end"); const v=values[i];
       labs+='<text class="radar-lab" x="'+L[0].toFixed(1)+'" y="'+L[1].toFixed(1)+'" text-anchor="'+anchor+'">'+lb+'</text>';
-      labs+='<text class="radar-val" x="'+L[0].toFixed(1)+'" y="'+(L[1]+12).toFixed(1)+'" text-anchor="'+anchor+'">'+(v==null?"\u2014":Math.round(v))+'</text>'; });
+      labs+='<text class="radar-val" x="'+L[0].toFixed(1)+'" y="'+(L[1]+12).toFixed(1)+'" text-anchor="'+anchor+'">'+(v==null?"n/a":Math.round(v))+'</text>'; });
     const dp=values.map((v,i)=>{ const vv=Math.min(v==null?0:v,max); return pt(i,R*vv/max).map(x=>x.toFixed(1)).join(","); }).join(" ");
     return '<svg viewBox="0 0 300 305" class="radar">'+grid+spokes+'<polygon class="radar-data" points="'+dp+'"></polygon>'+labs+'</svg>';
   }
@@ -629,7 +632,7 @@
     const table='<div class="sec-title">Starter points by position</div>'+
       '<div class="panel" style="padding:4px 8px"><table><thead><tr><th class="l">Team</th>'+
       d.POS.map(p=>'<th>'+p+'</th>').join("")+'<th>Total</th></tr></thead><tbody>'+rowsT+'</tbody></table></div>'+
-      '<p class="note">Points from starters only, across completed weeks. Highlighted = the top-scoring position for that team. RB and WR usually lead because the lineup starts more of them; the radar below removes that by comparing each position to the rest of the league.</p>';
+      '<p class="note">Points from starters only, across completed weeks. Highlighted = the top-scoring position for that team. FLEX is the discretionary W/R/T slot, kept as its own line. RB and WR usually lead because the lineup starts more of them; the radar below removes that by comparing each position to the rest of the league.</p>';
     const opts=STATE.teams.slice().sort((a,b)=>a.name.localeCompare(b.name)).map(t=>'<option value="'+t.rid+'"'+(t.rid===selectedScoringRid?" selected":"")+'>'+t.name+'</option>').join("");
     const sel='<div style="margin:4px 0 10px"><select id="scoringTeamSel" style="background:var(--panel2);color:var(--ink);border:1px solid var(--line);border-radius:6px;padding:6px 8px;font-size:13px">'+opts+'</select></div>';
     const idx=d.index[selectedScoringRid]; const vals=d.POS.map(p=>idx[p]);
@@ -641,15 +644,10 @@
     const se=$("scoringTeamSel"); if(se){ se.addEventListener("change",()=>{ selectedScoringRid=Number(se.value); renderScoring(); }); }
     SCORING_RENDERED=true;
   }
-  async function ensureScoring(){
+  function ensureScoring(){
     if(!STATE){ $("scoringOut").innerHTML='<div class="warn-box">Load the league first: hit Refresh from Sleeper on the Projections tab.</div>'; return; }
     if((STATE.played||0)===0){ $("scoringOut").innerHTML='<div class="warn-box">No completed weeks yet. Position scoring appears once a week has finalised.</div>'; return; }
-    if(SCORING_RENDERED && PLAYERS){ return; }
-    if(!PLAYERS){
-      $("scoringOut").innerHTML='<div class="note">Loading player positions (about 5MB, one-off for this session)...</div>';
-      try{ PLAYERS=await getPlayers(); }
-      catch(e){ console.error(e); $("scoringOut").innerHTML='<div class="warn-box">Could not load the player file: '+e.message+'. It uses the same Sleeper connection as Refresh, so if that works this will too.</div>'; return; }
-    }
+    if(startingBuckets(STATE).length===0){ $("scoringOut").innerHTML='<div class="warn-box">Roster layout not returned by Sleeper, so positions cannot be read. Try a refresh.</div>'; return; }
     renderScoring();
   }
   function doSim(){
