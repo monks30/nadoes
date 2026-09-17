@@ -1,0 +1,759 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Nadoes Lads — Season Tracker</title>
+<style>
+  .nst { --bg:#0f1216; --panel:#171c22; --panel2:#1e252d; --line:#2a333d; --ink:#e7edf3;
+         --dim:#93a0ad; --accent:#4ea1ff; --good:#43c98b; --warn:#e0a340; --bad:#e5646b;
+         --mine:#2b3a2e; --mine-line:#4b7a52; --gold:#e8c15a;
+         font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+         color:var(--ink); background:var(--bg); line-height:1.4; }
+  .nst *{ box-sizing:border-box; }
+  .nst .wrap{ max-width:1100px; margin:0 auto; padding:20px 16px 60px; }
+  .nst h1{ font-size:20px; margin:0 0 2px; letter-spacing:.2px; }
+  .nst .sub{ color:var(--dim); font-size:13px; margin:0 0 16px; }
+  .nst .bar{ display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-bottom:12px; }
+  .nst button{ background:var(--accent); color:#06121f; border:0; border-radius:6px;
+               padding:8px 14px; font-size:13px; font-weight:600; cursor:pointer; }
+  .nst button.sec{ background:var(--panel2); color:var(--ink); border:1px solid var(--line); }
+  .nst button:disabled{ opacity:.5; cursor:default; }
+  .nst input[type=text], .nst input[type=number]{ background:var(--panel2); color:var(--ink);
+        border:1px solid var(--line); border-radius:6px; padding:6px 8px; font-size:13px; }
+  .nst .status{ font-size:12.5px; color:var(--dim); margin:6px 0 14px; min-height:18px; white-space:pre-wrap; }
+  .nst .status.err{ color:var(--bad); }
+  .nst .status.ok{ color:var(--good); }
+  .nst .panel{ background:var(--panel); border:1px solid var(--line); border-radius:10px;
+               padding:14px 16px; margin-bottom:16px; }
+  .nst details{ background:var(--panel); border:1px solid var(--line); border-radius:10px; margin-bottom:16px; }
+  .nst summary{ cursor:pointer; padding:12px 16px; font-weight:600; font-size:14px; user-select:none; }
+  .nst details .body{ padding:0 16px 16px; }
+  .nst .grid2{ display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+  .nst .field{ display:flex; flex-direction:column; gap:4px; margin-bottom:10px; }
+  .nst .field label{ font-size:12px; color:var(--dim); }
+  .nst .field .hint{ font-size:11.5px; color:var(--dim); }
+  .nst table{ width:100%; border-collapse:collapse; font-size:13px; }
+  .nst th, .nst td{ padding:7px 8px; text-align:right; border-bottom:1px solid var(--line); }
+  .nst th:first-child, .nst td:first-child, .nst th.l, .nst td.l{ text-align:left; }
+  .nst th{ color:var(--dim); font-weight:600; font-size:11.5px; text-transform:uppercase; letter-spacing:.4px; }
+  .nst td.num{ font-variant-numeric:tabular-nums; font-feature-settings:"tnum"; }
+  .nst tr.mine td{ background:var(--mine); }
+  .nst tr.mine td:first-child{ box-shadow:inset 3px 0 0 var(--mine-line); }
+  .nst .barcell{ position:relative; }
+  .nst .barcell .fill{ position:absolute; left:0; top:0; bottom:0; background:rgba(78,161,255,.16); }
+  .nst .barcell span{ position:relative; }
+  .nst .sec-title{ font-size:15px; font-weight:700; margin:22px 0 8px; }
+  .nst .note{ font-size:12px; color:var(--dim); margin-top:8px; }
+  .nst .pill{ display:inline-block; background:var(--panel2); border:1px solid var(--line);
+              border-radius:20px; padding:3px 10px; font-size:11.5px; color:var(--dim); margin-right:6px; }
+  .nst .warn-box{ background:rgba(224,163,64,.10); border:1px solid var(--warn); color:#f0cf95;
+                  border-radius:8px; padding:10px 12px; font-size:12.5px; margin-bottom:14px; }
+  .nst a{ color:var(--accent); }
+  .nst .projtable input{ width:70px; }
+  .nst .muted{ color:var(--dim); }
+  .nst code{ background:var(--panel2); padding:1px 5px; border-radius:4px; font-size:12px; }
+  /* tabs */
+  .nst .tabs{ display:flex; gap:2px; border-bottom:1px solid var(--line); margin-bottom:18px; }
+  .nst .tab{ background:transparent; color:var(--dim); border:0; border-bottom:2px solid transparent;
+             border-radius:0; padding:9px 16px; font-size:13px; font-weight:600; cursor:pointer; }
+  .nst .tab:hover{ color:var(--ink); }
+  .nst .tab.active{ color:var(--ink); border-bottom-color:var(--accent); }
+  .nst .tab.alert{ color:var(--warn); }
+  .nst .tab.alert::after{ content:"\2022"; margin-left:6px; }
+  /* headline cards */
+  .nst .cards{ display:flex; gap:12px; flex-wrap:wrap; margin-bottom:6px; }
+  .nst .card{ flex:1; min-width:220px; background:var(--panel); border:1px solid var(--line);
+              border-radius:10px; padding:14px 16px; }
+  .nst .card.champ{ border-color:var(--gold); background:linear-gradient(180deg,rgba(232,193,90,.10),transparent); }
+  .nst .card .lab{ font-size:11px; text-transform:uppercase; letter-spacing:.5px; color:var(--dim); margin-bottom:6px; }
+  .nst .card .big{ font-size:18px; font-weight:700; }
+  .nst .card .big .pc{ color:var(--gold); font-variant-numeric:tabular-nums; }
+  .nst .card .sub2{ font-size:12.5px; color:var(--dim); margin-top:4px; }
+  /* bracket */
+  .nst .bracket{ display:flex; gap:26px; overflow-x:auto; padding:6px 2px 10px; }
+  .nst .bround{ display:flex; flex-direction:column; justify-content:space-around; min-width:190px; gap:14px; }
+  .nst .brlabel{ font-size:11px; text-transform:uppercase; letter-spacing:.5px; color:var(--dim);
+                 margin-bottom:4px; text-align:center; }
+  .nst .match{ background:var(--panel2); border:1px solid var(--line); border-radius:8px; overflow:hidden; }
+  .nst .slot{ display:flex; justify-content:space-between; align-items:center; padding:7px 10px; font-size:12.5px; }
+  .nst .slot + .slot{ border-top:1px solid var(--line); }
+  .nst .slot.win{ background:rgba(67,201,139,.12); font-weight:600; }
+  .nst .slot .seed{ color:var(--dim); font-size:11px; margin-right:6px; }
+  .nst .slot .wp{ color:var(--dim); font-variant-numeric:tabular-nums; font-size:11.5px; }
+  .nst .slot.win .wp{ color:var(--good); }
+  .nst .slot.bye{ color:var(--dim); font-style:italic; }
+  .nst .champbox{ align-self:center; }
+  .nst .champbox .match{ border-color:var(--gold); }
+  .nst .champbox .slot{ background:linear-gradient(180deg,rgba(232,193,90,.14),transparent); font-weight:700; }
+  /* scoring / radar */
+  .nst td.hot{ color:var(--good); font-weight:700; }
+  .nst .radar{ width:300px; max-width:100%; height:auto; display:block; margin:6px auto 2px; }
+  .nst .radar-grid{ fill:none; stroke:var(--line); stroke-width:1; }
+  .nst .radar-avg{ fill:none; stroke:var(--accent); stroke-width:1.5; stroke-dasharray:4 3; }
+  .nst .radar-data{ fill:rgba(78,161,255,.20); stroke:var(--accent); stroke-width:2; }
+  .nst .radar-lab{ fill:var(--ink); font-size:11px; font-weight:600; }
+  .nst .radar-val{ fill:var(--dim); font-size:10px; }
+</style>
+</head>
+<body class="nst">
+<div class="wrap">
+  <h1>Nadoes Lads — Season Tracker</h1>
+  <p class="sub">Live ladder, projected season, playoff odds and bracket by Monte Carlo. Week-over-week history is still to come.</p>
+
+  <div class="tabs">
+    <button class="tab active" id="tab-main" data-pane="main">Projections</button>
+    <button class="tab" id="tab-scoring" data-pane="scoring">Scoring</button>
+    <button class="tab" id="tab-admin" data-pane="admin">Admin</button>
+  </div>
+
+  <div class="tabpane" id="pane-main">
+    <div class="bar">
+      <button id="fetchBtn">Refresh from Sleeper</button>
+      <button id="simBtn" class="sec" disabled>Run simulation</button>
+      <span class="pill" id="metaPill">no data yet</span>
+    </div>
+    <div class="status" id="status">Click "Refresh from Sleeper" to pull the league. If it fails, open the Admin tab.</div>
+    <div id="fallback" class="warn-box" style="display:none"></div>
+    <div id="output"></div>
+  </div>
+
+  <div class="tabpane" id="pane-scoring" style="display:none">
+    <div id="scoringOut"><div class="note">Open this tab after a refresh to load position scoring.</div></div>
+  </div>
+
+  <div class="tabpane" id="pane-admin" style="display:none">
+    <div class="sec-title" style="margin-top:2px">Settings &amp; model</div>
+    <div class="panel">
+      <div class="grid2">
+        <div class="field">
+          <label>Sleeper league ID</label>
+          <input type="text" id="leagueId" value="1391256159565930496">
+        </div>
+        <div class="field">
+          <label>My team (row highlight)</label>
+          <input type="text" id="myTeam" value="MonkeyRangers">
+        </div>
+        <div class="field">
+          <label>Simulations</label>
+          <input type="number" id="nSims" value="10000" min="1000" max="50000" step="1000">
+        </div>
+        <div class="field">
+          <label>Prior strength k <span class="hint">(higher = trust projections longer)</span></label>
+          <input type="number" id="kVal" value="5" min="0" max="20" step="1">
+        </div>
+        <div class="field">
+          <label>Weekly score spread (SD) override</label>
+          <input type="number" id="sdVal" placeholder="auto" step="1">
+          <span class="hint">Leave blank to auto-estimate from played weeks (needs 2+ weeks; defaults to 28 early).</span>
+        </div>
+      </div>
+      <div id="projWrap" style="display:none">
+        <div class="sec-title" style="margin-top:6px">Projected points per game (the early-season prior)</div>
+        <p class="note" style="margin-top:0">Blank = that team falls back to its own actual average (or league average with no games played). Fill from your value board, summing each team's likely starters, to make early-week odds roster-aware. Saved to this browser.</p>
+        <table class="projtable"><tbody id="projBody"></tbody></table>
+      </div>
+      <div class="bar" style="margin-top:12px;margin-bottom:0">
+        <button id="adminRunBtn">Save &amp; run simulation</button>
+        <button id="adminFetchBtn" class="sec">Refresh from Sleeper</button>
+      </div>
+    </div>
+
+    <div class="sec-title">If the fetch fails</div>
+    <div class="panel" style="font-size:13px">
+      <p>Sleeper's read API is public, so the usual cause is your browser blocking a request made from a double-clicked file (a <code>file://</code> address). Two fixes:</p>
+      <p><b>Easiest:</b> run it from a local server so the address becomes <code>http://localhost</code>. Put this file in a folder, open a terminal there, and run<br>
+         <code>python -m http.server 8000</code><br>
+         then open <code>http://localhost:8000/Nadoes_Season_Tracker.html</code>.</p>
+      <p><b>Check the league is public:</b> open <code>https://api.sleeper.app/v1/league/1391256159565930496</code> in a browser tab. If you see JSON, the API is reachable and the issue is the origin rule above.</p>
+      <p>The exact error appears in the status line on the Projections tab and in the browser console (F12). Paste it back to me if it sticks.</p>
+    </div>
+  </div>
+</div>
+
+<script>
+(function(){
+  "use strict";
+  const BASE = "https://api.sleeper.app/v1";
+  const LS = "nadoesTrackerV1";
+  const $ = id => document.getElementById(id);
+  const statusEl = $("status");
+
+  function setStatus(msg, cls){ statusEl.textContent = msg; statusEl.className = "status" + (cls?(" "+cls):""); }
+  function fmt(n, d){ return (n==null||isNaN(n)) ? "—" : Number(n).toFixed(d==null?1:d); }
+  function pct(n){ return (n==null||isNaN(n)) ? "—" : (n<0.05?"0":n>99.95?"100":n.toFixed(n>=10?0:1)); }
+
+  // ---------- persistence ----------
+  function saveCfg(){
+    const proj = {};
+    document.querySelectorAll("#projBody input").forEach(inp=>{
+      if(inp.value.trim()!=="") proj[inp.dataset.team]=Number(inp.value);
+    });
+    const cfg = { leagueId:$("leagueId").value.trim(), myTeam:$("myTeam").value.trim(),
+      nSims:Number($("nSims").value), k:Number($("kVal").value),
+      sd:$("sdVal").value.trim()==="" ? null : Number($("sdVal").value), proj };
+    try{ localStorage.setItem(LS+".cfg", JSON.stringify(cfg)); }catch(e){}
+  }
+  function loadCfg(){
+    try{ const c=JSON.parse(localStorage.getItem(LS+".cfg")); if(!c) return {};
+      if(c.leagueId) $("leagueId").value=c.leagueId;
+      if(c.myTeam) $("myTeam").value=c.myTeam;
+      if(c.nSims) $("nSims").value=c.nSims;
+      if(c.k!=null) $("kVal").value=c.k;
+      if(c.sd!=null) $("sdVal").value=c.sd;
+      return c;
+    }catch(e){ return {}; }
+  }
+  function saveCache(bundle){ try{ localStorage.setItem(LS+".cache", JSON.stringify({t:Date.now(),bundle})); }catch(e){} }
+  function loadCache(){ try{ return JSON.parse(localStorage.getItem(LS+".cache")); }catch(e){ return null; } }
+
+  // ---------- fetch ----------
+  async function getJSON(path){
+    const res = await fetch(BASE+path);
+    if(!res.ok) throw new Error("HTTP "+res.status+" on "+path);
+    return res.json();
+  }
+  async function fetchLeague(id){
+    setStatus("Fetching league settings…");
+    const league = await getJSON("/league/"+id);
+    if(!league || !league.settings) throw new Error("No league returned — check the league ID.");
+    const regWeeks = (league.settings.playoff_week_start || 15) - 1;
+    setStatus("Fetching teams and rosters…");
+    const [users, rosters] = await Promise.all([ getJSON("/league/"+id+"/users"), getJSON("/league/"+id+"/rosters") ]);
+    setStatus("Fetching all "+regWeeks+" weeks of matchups…");
+    const weeks = [];
+    for(let w=1; w<=regWeeks; w++) weeks.push(w);
+    const results = await Promise.all(weeks.map(w=>getJSON("/league/"+id+"/matchups/"+w).catch(()=>null)));
+    const matchups = {};
+    weeks.forEach((w,i)=>{ matchups[w] = results[i] || []; });
+    return { league, users, rosters, matchups, regWeeks };
+  }
+
+  // ---------- build state ----------
+  function buildState(bundle){
+    const { league, users, rosters, matchups, regWeeks } = bundle;
+    const s = league.settings || {};
+    const playoffTeams = s.playoff_teams || 6;
+    const leagueAverageMatch = (s.league_average_match===1);
+    const divisions = s.divisions || 0;
+    const userById = {};
+    (users||[]).forEach(u=>userById[u.user_id]=u);
+
+    const teams = (rosters||[]).map(r=>{
+      const u = userById[r.owner_id];
+      const name = (u && u.metadata && u.metadata.team_name) ? u.metadata.team_name
+                 : (u && u.display_name) ? u.display_name : ("Team "+r.roster_id);
+      const st = r.settings || {};
+      const pf = (st.fpts||0) + (st.fpts_decimal||0)/100;
+      const pa = (st.fpts_against||0) + (st.fpts_against_decimal||0)/100;
+      return { rid:r.roster_id, name, wins:st.wins||0, losses:st.losses||0, ties:st.ties||0,
+               pf, pa, division:(st.division||null) };
+    });
+    const byRid = {}; teams.forEach(t=>byRid[t.rid]=t);
+
+    const completedWeeks = [], remainingWeeks = [];
+    const scoresByWeek = {};
+    const schedule = {};
+    let scheduleGaps = [];
+    for(let w=1; w<=regWeeks; w++){
+      const rows = matchups[w] || [];
+      const hasRows = rows.length>0;
+      const allScored = hasRows && rows.every(x=>Number(x.points)>0);
+      const groups = {};
+      rows.forEach(x=>{ (groups[x.matchup_id]=groups[x.matchup_id]||[]).push(x); });
+      if(allScored){
+        completedWeeks.push(w);
+        const sc={}; rows.forEach(x=>sc[x.roster_id]=Number(x.points)); scoresByWeek[w]=sc;
+      } else {
+        remainingWeeks.push(w);
+        const pairs=[]; let ok = hasRows;
+        Object.keys(groups).forEach(m=>{ const g=groups[m]; if(g.length===2) pairs.push([g[0].roster_id,g[1].roster_id]); else ok=false; });
+        if(!ok || pairs.length < teams.length/2) scheduleGaps.push(w);
+        schedule[w]=pairs;
+      }
+    }
+
+    const played = completedWeeks.length;
+    const totalPf = teams.reduce((a,t)=>a+t.pf,0);
+    const leagueMean = played>0 ? totalPf/(teams.length*played) : 110;
+
+    teams.forEach(t=>{ t.apW=0; t.apL=0; t.apT=0; });
+    completedWeeks.forEach(w=>{
+      const sc = scoresByWeek[w];
+      teams.forEach(a=>{
+        teams.forEach(b=>{ if(a.rid===b.rid) return;
+          if(sc[a.rid]>sc[b.rid]) a.apW++; else if(sc[a.rid]<sc[b.rid]) a.apL++; else a.apT++; });
+      });
+    });
+
+    return { teams, byRid, playoffTeams, leagueAverageMatch, divisions, hasDivisions:divisions>=2, matchups,
+             regWeeks, completedWeeks, remainingWeeks, scoresByWeek, schedule, scheduleGaps,
+             played, leagueMean, leagueName: league.name || "League", season: league.season || "" };
+  }
+
+  // ---------- model inputs ----------
+  function computeSd(state){
+    let sumsq=0, n=0;
+    state.teams.forEach(t=>{
+      const xs = state.completedWeeks.map(w=>state.scoresByWeek[w][t.rid]).filter(v=>v!=null);
+      if(xs.length>=2){
+        const m = xs.reduce((a,v)=>a+v,0)/xs.length;
+        xs.forEach(v=>{ sumsq+=(v-m)*(v-m); n++; });
+      }
+    });
+    if(n>=8) return { sd:Math.sqrt(sumsq/(n-1)), auto:true };
+    return { sd:28, auto:false };
+  }
+  function applyMeans(state, cfg){
+    const k = cfg.k;
+    const w = state.played>0 ? k/(k+state.played) : 1;
+    state.priorW = w;
+    state.teams.forEach(t=>{
+      const actual = state.played>0 ? t.pf/state.played : state.leagueMean;
+      const prior = (cfg.proj && cfg.proj[t.name]!=null) ? cfg.proj[t.name] : state.leagueMean;
+      t.actualPPG = actual; t.prior = prior;
+      t.mean = w*prior + (1-w)*actual;
+    });
+  }
+
+  // ---------- maths ----------
+  function gauss(m,s){
+    let u=0,v=0; while(u===0)u=Math.random(); while(v===0)v=Math.random();
+    const z=Math.sqrt(-2*Math.log(u))*Math.cos(2*Math.PI*v);
+    const x=m+z*s; return x<0?0:x;
+  }
+  function nextPow2(n){ let p=1; while(p<n) p*=2; return p; }
+  function erf(x){
+    const t=1/(1+0.3275911*Math.abs(x));
+    const y=1-(((((1.061405429*t-1.453152027)*t)+1.421413741)*t-0.284496736)*t+0.254829592)*t*Math.exp(-x*x);
+    return x>=0?y:-y;
+  }
+  function pWin(muA,muB,sd){ return 0.5*(1+erf((muA-muB)/(sd*Math.SQRT2)/Math.SQRT2)); }
+
+  // bracket for one simulated season: returns {champ, finalists:[a,b]}
+  function simBracket(seedRids, means, sd){
+    const P=seedRids.length; const byes=nextPow2(P)-P;
+    let alive=seedRids.map((rid,i)=>({rank:i,rid}));
+    let first=true, finalists=null;
+    while(alive.length>1){
+      alive.sort((a,b)=>a.rank-b.rank);
+      if(alive.length===2) finalists=[alive[0].rid, alive[1].rid];
+      let advancing=[], playing=alive;
+      if(first && byes>0){ advancing=alive.slice(0,byes); playing=alive.slice(byes); }
+      first=false;
+      let i=0,j=playing.length-1;
+      while(i<j){ const A=playing[i],B=playing[j];
+        const sa=gauss(means[A.rid],sd), sb=gauss(means[B.rid],sd);
+        advancing.push(sa>=sb?A:B); i++; j--; }
+      if(i===j) advancing.push(playing[i]);
+      alive=advancing;
+    }
+    return { champ:alive[0].rid, finalists:finalists||[alive[0].rid] };
+  }
+
+  // deterministic "chalk" bracket for display: favourites (higher mean) advance
+  function predictBracket(seedList, means, sd){
+    const P=seedList.length; const byes=nextPow2(P)-P;
+    const rounds=[];
+    let alive=seedList.map(s=>({rank:s.rank, rid:s.rid, seed:s.seed}));
+    let first=true;
+    while(alive.length>1){
+      alive.sort((a,b)=>a.rank-b.rank);
+      const rm=[]; let advancing=[], playing=alive;
+      if(first && byes>0){
+        const bt=alive.slice(0,byes);
+        bt.forEach(t=>rm.push({a:t,b:null,pA:1}));
+        advancing=advancing.concat(bt);
+        playing=alive.slice(byes);
+      }
+      first=false;
+      let i=0,j=playing.length-1;
+      while(i<j){ const A=playing[i],B=playing[j];
+        const pA=pWin(means[A.rid],means[B.rid],sd);
+        const winner = means[A.rid]>=means[B.rid] ? A : B;
+        rm.push({a:A,b:B,pA}); advancing.push(winner); i++; j--; }
+      if(i===j){ rm.push({a:playing[i],b:null,pA:1}); advancing.push(playing[i]); }
+      rounds.push(rm); alive=advancing;
+    }
+    return { rounds, champion: alive[0] };
+  }
+
+  // ---------- simulation ----------
+  function runSim(state, cfg, sd){
+    const N=cfg.nSims;
+    const rids=state.teams.map(t=>t.rid);
+    const means={}; state.teams.forEach(t=>means[t.rid]=t.mean);
+    const P=state.playoffTeams, byes=nextPow2(P)-P;
+    const median=state.leagueAverageMatch;
+    const baseW={},baseT={},baseP={},baseA={};
+    state.teams.forEach(t=>{ baseW[t.rid]=t.wins; baseT[t.rid]=t.ties; baseP[t.rid]=t.pf; baseA[t.rid]=t.pa; });
+    const playoff={},bye={},top={},champ={},fin={},winSum={},pfSum={},paSum={},winsArr={};
+    rids.forEach(r=>{playoff[r]=0;bye[r]=0;top[r]=0;champ[r]=0;fin[r]=0;winSum[r]=0;pfSum[r]=0;paSum[r]=0;winsArr[r]=[];});
+
+    for(let s=0;s<N;s++){
+      const wins={},ties={},pf={},pa={};
+      rids.forEach(r=>{wins[r]=baseW[r];ties[r]=baseT[r];pf[r]=baseP[r];pa[r]=baseA[r];});
+      for(const wk of state.remainingWeeks){
+        const games=state.schedule[wk]||[]; const wkScores={};
+        for(const g of games){ const a=g[0],b=g[1];
+          const sa=gauss(means[a],sd), sb=gauss(means[b],sd);
+          pf[a]+=sa; pf[b]+=sb; pa[a]+=sb; pa[b]+=sa; wkScores[a]=sa; wkScores[b]=sb;
+          if(sa>sb) wins[a]++; else if(sb>sa) wins[b]++; else { ties[a]++; ties[b]++; }
+        }
+        if(median){
+          const vals=Object.values(wkScores).sort((x,y)=>x-y); const n=vals.length;
+          if(n){ const med=n%2?vals[(n-1)/2]:(vals[n/2-1]+vals[n/2])/2;
+            for(const r in wkScores){ if(wkScores[r]>med) wins[r]++; } }
+        }
+      }
+      const order=rids.slice().sort((x,y)=>{
+        const wx=wins[x]+0.5*ties[x], wy=wins[y]+0.5*ties[y];
+        if(wy!==wx) return wy-wx; return pf[y]-pf[x];
+      });
+      for(let i=0;i<order.length;i++){ const r=order[i];
+        winSum[r]+=wins[r]; pfSum[r]+=pf[r]; paSum[r]+=pa[r]; winsArr[r].push(wins[r]);
+        if(i<P) playoff[r]++; if(i<byes) bye[r]++; if(i===0) top[r]++;
+      }
+      const br=simBracket(order.slice(0,P), means, sd);
+      champ[br.champ]++;
+      br.finalists.forEach(f=>fin[f]++);
+    }
+    return state.teams.map(t=>{
+      const arr=winsArr[t.rid].slice().sort((a,b)=>a-b);
+      const q=p=>arr[Math.floor(p*(arr.length-1))];
+      return { rid:t.rid, name:t.name,
+        playoffPct:playoff[t.rid]/N*100, byePct:bye[t.rid]/N*100,
+        topPct:top[t.rid]/N*100, champPct:champ[t.rid]/N*100, finalPct:fin[t.rid]/N*100,
+        projWins:winSum[t.rid]/N, projPF:pfSum[t.rid]/N, projPA:paSum[t.rid]/N,
+        p10:q(0.10), p90:q(0.90), mean:t.mean };
+    });
+  }
+
+  // ---------- render ----------
+  let STATE=null; let PLAYERS=null; let SCORING_RENDERED=false; let selectedScoringRid=null;
+  function mineMatch(name){ const m=$("myTeam").value.trim().toLowerCase(); return m && name.toLowerCase().includes(m); }
+
+  function renderProjInputs(state, cfg){
+    const body=$("projBody"); body.innerHTML="";
+    state.teams.slice().sort((a,b)=>a.name.localeCompare(b.name)).forEach(t=>{
+      const tr=document.createElement("tr");
+      const val=(cfg.proj && cfg.proj[t.name]!=null)?cfg.proj[t.name]:"";
+      tr.innerHTML='<td class="l">'+t.name+'</td>'+
+        '<td style="text-align:right"><input type="number" step="0.1" data-team="'+t.name.replace(/"/g,'&quot;')+'" value="'+val+'" placeholder="'+fmt(state.leagueMean,0)+'"></td>';
+      body.appendChild(tr);
+    });
+    $("projWrap").style.display="block";
+    body.querySelectorAll("input").forEach(inp=>inp.addEventListener("change",saveCfg));
+  }
+
+  function renderHeadline(res, state){
+    const champ=res.slice().sort((a,b)=>b.champPct-a.champPct)[0];
+    const fins=res.slice().sort((a,b)=>b.finalPct-a.finalPct).slice(0,2);
+    return '<div class="cards">'+
+      '<div class="card champ"><div class="lab">Predicted champion</div>'+
+        '<div class="big">'+champ.name+' <span class="pc">'+pct(champ.champPct)+'%</span></div>'+
+        '<div class="sub2">most likely to win it all across '+state.nSims.toLocaleString()+' simulated seasons</div></div>'+
+      '<div class="card"><div class="lab">Predicted conference champions</div>'+
+        '<div class="big" style="font-size:15px">'+fins[0].name+' &nbsp;·&nbsp; '+fins[1].name+'</div>'+
+        '<div class="sub2">most likely pair to reach the final ('+pct(fins[0].finalPct)+'% / '+pct(fins[1].finalPct)+'%)</div></div>'+
+      '</div>';
+  }
+
+  function renderLadder(state){
+    const teams=state.teams.slice().sort((a,b)=>{
+      const wa=a.wins+0.5*a.ties, wb=b.wins+0.5*b.ties;
+      if(wb!==wa) return wb-wa; return b.pf-a.pf;
+    });
+    let rows="";
+    teams.forEach((t,i)=>{
+      const apGames=t.apW+t.apL+t.apT;
+      const apPct=apGames?(t.apW/apGames*100):null;
+      const rec=t.wins+"-"+t.losses+(t.ties?("-"+t.ties):"");
+      const cls=mineMatch(t.name)?' class="mine"':"";
+      rows+='<tr'+cls+'><td class="l num">'+(i+1)+'</td><td class="l">'+t.name+'</td>'+
+        '<td class="num">'+rec+'</td><td class="num">'+fmt(t.pf,2)+'</td><td class="num">'+fmt(t.pa,2)+'</td>'+
+        '<td class="num">'+t.apW+'-'+t.apL+(t.apT?('-'+t.apT):'')+'</td>'+
+        '<td class="num">'+(apPct==null?'—':apPct.toFixed(0)+'%')+'</td></tr>';
+    });
+    return '<div class="sec-title">Ladder (actual)</div>'+
+      '<div class="panel" style="padding:4px 8px"><table><thead><tr>'+
+      '<th class="l">#</th><th class="l">Team</th><th>W-L</th><th>PF</th><th>PA</th>'+
+      '<th>All-play</th><th>All-play%</th></tr></thead><tbody>'+rows+'</tbody></table></div>'+
+      '<p class="note">All-play = record if every team played every other team each week. It strips out schedule luck.</p>';
+  }
+
+  function renderProjected(res, state){
+    const teams=res.slice().sort((a,b)=>b.projWins-a.projWins || b.projPF-a.projPF);
+    const totalGames=state.regWeeks*(state.leagueAverageMatch?2:1);
+    const byes=nextPow2(state.playoffTeams)-state.playoffTeams;
+    let rows="";
+    teams.forEach((r,i)=>{
+      const cls=mineMatch(r.name)?' class="mine"':"";
+      const losses=totalGames-r.projWins;
+      const seedTag = i<state.playoffTeams ? ('<span class="seed" style="margin-right:0">#'+(i+1)+'</span>') : '';
+      rows+='<tr'+cls+'><td class="l num">'+(i+1)+'</td><td class="l">'+r.name+'</td>'+
+        '<td class="num">'+fmt(r.projWins,1)+'-'+fmt(losses,1)+'</td>'+
+        '<td class="num">'+fmt(r.projPF,1)+'</td><td class="num">'+fmt(r.projPA,1)+'</td>'+
+        '<td class="num muted">'+r.p10+'–'+r.p90+'</td>'+
+        '<td class="num barcell"><div class="fill" style="width:'+Math.min(100,r.playoffPct)+'%"></div><span>'+pct(r.playoffPct)+'%</span></td>'+
+        (byes>0?('<td class="num">'+pct(r.byePct)+'%</td>'):'')+
+        '<td class="num">'+pct(r.finalPct)+'%</td>'+
+        '<td class="num barcell"><div class="fill" style="width:'+Math.min(100,r.champPct)+'%"></div><span>'+pct(r.champPct)+'%</span></td></tr>';
+    });
+    return '<div class="sec-title">Projected final standings</div>'+
+      '<div class="panel" style="padding:4px 8px"><table><thead><tr>'+
+      '<th class="l">#</th><th class="l">Team</th><th>Proj W-L</th><th>Proj PF</th><th>Proj PA</th>'+
+      '<th>Win range</th><th>Playoffs</th>'+(byes>0?'<th>Bye</th>':'')+'<th>Final</th><th>Title</th>'+
+      '</tr></thead><tbody>'+rows+'</tbody></table></div>'+
+      '<p class="note">Projected PF/PA and record are averages across every simulated season. “Final” = chance of reaching the championship game (a conference title). Points-against depends on the simulated scores of each week’s opponent.</p>';
+  }
+
+  function renderBracket(res, state, sd){
+    const seedRes=res.slice().sort((a,b)=>b.projWins-a.projWins || b.projPF-a.projPF).slice(0, state.playoffTeams);
+    const nameByRid={}, meanByRid={}, champPctByRid={};
+    res.forEach(r=>{ nameByRid[r.rid]=r.name; meanByRid[r.rid]=r.mean; champPctByRid[r.rid]=r.champPct; });
+    const seedList=seedRes.map((r,i)=>({rank:i, seed:i+1, rid:r.rid}));
+    const bk=predictBracket(seedList, meanByRid, sd);
+    const nRounds=bk.rounds.length;
+    const labelFor=i=>{ const fromEnd=nRounds-1-i;
+      if(fromEnd===0) return "Final"; if(fromEnd===1) return "Semifinals"; if(fromEnd===2) return "Quarterfinals"; return "Round "+(i+1); };
+    function slot(entry, isWin){
+      if(!entry) return '<div class="slot bye"><span>—</span></div>';
+      const nm=nameByRid[entry.rid]; const cls='slot'+(isWin?' win':'')+(mineMatch(nm)?'':'');
+      return '<div class="'+cls+'"><span><span class="seed">'+entry.seed+'</span>'+nm+'</span>'+
+             (entry._wp!=null?('<span class="wp">'+pct(entry._wp*100)+'%</span>'):'')+'</div>';
+    }
+    let cols="";
+    bk.rounds.forEach((rm,ri)=>{
+      let boxes="";
+      rm.forEach(m=>{
+        if(m.b===null){ // bye
+          boxes+='<div class="match"><div class="slot"><span><span class="seed">'+m.a.seed+'</span>'+nameByRid[m.a.rid]+'</span></div><div class="slot bye"><span>bye</span></div></div>';
+        } else {
+          const aWin = meanByRid[m.a.rid] >= meanByRid[m.b.rid];
+          const A=Object.assign({},m.a,{_wp:m.pA}); const B=Object.assign({},m.b,{_wp:1-m.pA});
+          boxes+='<div class="match">'+slot(A,aWin)+slot(B,!aWin)+'</div>';
+        }
+      });
+      cols+='<div class="bround"><div class="brlabel">'+labelFor(ri)+'</div>'+boxes+'</div>';
+    });
+    const champRid=bk.champion.rid;
+    cols+='<div class="bround champbox"><div class="brlabel">Champion</div>'+
+          '<div class="match"><div class="slot"><span>🏆 '+nameByRid[champRid]+'</span>'+
+          '<span class="wp">'+pct(champPctByRid[champRid])+'%</span></div></div></div>';
+    return '<div class="sec-title">Predicted bracket</div>'+
+      '<div class="panel"><div class="bracket">'+cols+'</div></div>'+
+      '<p class="note">Seeded by projected final standings; the favourite (higher projected score) advances, with each matchup’s win chance shown. The champion’s figure is its title odds from the full simulation, which accounts for byes and upsets, so it can differ from simply following the favourites here.</p>';
+  }
+
+  function renderModelNote(state, sd, sdAuto){
+    const w=state.priorW;
+    const lean = w>0.6?"mostly projections":w>0.4?"an even split":"mostly real scores";
+    const byes=nextPow2(state.playoffTeams)-state.playoffTeams;
+    return '<div class="panel" style="font-size:12.5px">'+
+      '<b>Model:</b> '+state.played+' week'+(state.played===1?"":"s")+' played, '+
+      state.remainingWeeks.length+' regular-season week'+(state.remainingWeeks.length===1?"":"s")+' left. '+
+      'Prior weight w = '+w.toFixed(2)+' ('+lean+'). '+
+      'Weekly spread SD = '+sd.toFixed(1)+(sdAuto?" (from data)":" (default; too few weeks to estimate)")+'. '+
+      (state.leagueAverageMatch?"Median game is ON. ":"")+
+      state.playoffTeams+' playoff teams'+(byes>0?(", "+byes+" bye"):"")+'.'+
+      (state.played<4?' <span style="color:var(--warn)">Early season: odds lean on the prior and swing hard week to week. Treat the win ranges, not the point estimates, as the real signal.</span>':'')+
+      '</div>';
+  }
+
+  // ---------- scoring / position radar ----------
+  async function getPlayers(){
+    const res = await fetch(BASE+"/players/nfl");
+    if(!res.ok) throw new Error("HTTP "+res.status+" on /players/nfl");
+    return res.json();
+  }
+  function computePositionPoints(state){
+    const POS=["QB","RB","WR","TE","K","DEF"];
+    const raw={}; state.teams.forEach(t=>{ raw[t.rid]={}; POS.forEach(p=>raw[t.rid][p]=0); });
+    (state.completedWeeks||[]).forEach(w=>{
+      const rows=(state.matchups&&state.matchups[w])||[];
+      rows.forEach(row=>{
+        const rid=row.roster_id; if(!raw[rid]) return;
+        const starters=row.starters||[]; const sp=row.starters_points; const pp=row.players_points||{};
+        starters.forEach((pid,idx)=>{
+          if(!pid||pid==="0") return;
+          let pos=null; const info=PLAYERS?PLAYERS[pid]:null;
+          if(info&&info.position) pos=info.position;
+          else if(/^[A-Za-z]{2,4}$/.test(String(pid))) pos="DEF";
+          if(!pos||POS.indexOf(pos)<0) return;
+          const pts=(Array.isArray(sp)&&sp[idx]!=null)?sp[idx]:(pp[pid]!=null?pp[pid]:0);
+          raw[rid][pos]+=Number(pts)||0;
+        });
+      });
+    });
+    const index={}; state.teams.forEach(t=>index[t.rid]={});
+    POS.forEach(p=>{
+      state.teams.forEach(t=>{
+        let sum=0,cnt=0; state.teams.forEach(o=>{ if(o.rid!==t.rid){ sum+=raw[o.rid][p]; cnt++; } });
+        const avg=cnt?sum/cnt:0;
+        index[t.rid][p]= avg>0 ? raw[t.rid][p]/avg*100 : (raw[t.rid][p]>0?200:null);
+      });
+    });
+    const teams=state.teams.map(t=>({rid:t.rid,name:t.name,total:POS.reduce((a,p)=>a+raw[t.rid][p],0)}));
+    let gmax=100; state.teams.forEach(t=>POS.forEach(p=>{ const v=index[t.rid][p]; if(v!=null&&v>gmax) gmax=v; }));
+    return {POS,raw,index,teams,gmax};
+  }
+  function radarSVG(labels, values, max){
+    const n=labels.length, R=110, cx=150, cy=145;
+    const ang=i=>(-90+i*360/n)*Math.PI/180;
+    const pt=(i,r)=>[cx+r*Math.cos(ang(i)), cy+r*Math.sin(ang(i))];
+    let grid="";
+    [50,100,150,200].forEach(g=>{ if(g>max) return; const rr=R*g/max;
+      const pts=labels.map((_,i)=>pt(i,rr).map(v=>v.toFixed(1)).join(",")).join(" ");
+      grid+='<polygon class="'+(g===100?'radar-avg':'radar-grid')+'" points="'+pts+'"></polygon>'; });
+    let spokes="", labs="";
+    labels.forEach((lb,i)=>{ const e=pt(i,R);
+      spokes+='<line class="radar-grid" x1="'+cx+'" y1="'+cy+'" x2="'+e[0].toFixed(1)+'" y2="'+e[1].toFixed(1)+'"></line>';
+      const L=pt(i,R+15); const anchor=Math.abs(L[0]-cx)<6?"middle":(L[0]>cx?"start":"end"); const v=values[i];
+      labs+='<text class="radar-lab" x="'+L[0].toFixed(1)+'" y="'+L[1].toFixed(1)+'" text-anchor="'+anchor+'">'+lb+'</text>';
+      labs+='<text class="radar-val" x="'+L[0].toFixed(1)+'" y="'+(L[1]+12).toFixed(1)+'" text-anchor="'+anchor+'">'+(v==null?"\u2014":Math.round(v))+'</text>'; });
+    const dp=values.map((v,i)=>{ const vv=Math.min(v==null?0:v,max); return pt(i,R*vv/max).map(x=>x.toFixed(1)).join(","); }).join(" ");
+    return '<svg viewBox="0 0 300 305" class="radar">'+grid+spokes+'<polygon class="radar-data" points="'+dp+'"></polygon>'+labs+'</svg>';
+  }
+  function renderScoring(){
+    const d=computePositionPoints(STATE);
+    if(selectedScoringRid==null){ const mine=STATE.teams.find(t=>mineMatch(t.name)); selectedScoringRid=mine?mine.rid:STATE.teams[0].rid; }
+    if(!d.teams.some(t=>t.rid===selectedScoringRid)) selectedScoringRid=STATE.teams[0].rid;
+    const max = d.gmax<=150?150:200;
+    const rowsT=d.teams.slice().sort((a,b)=>b.total-a.total).map(t=>{
+      const r=d.raw[t.rid]; const mx=Math.max.apply(null,d.POS.map(p=>r[p]));
+      const cls=mineMatch(t.name)?" class=\"mine\"":"";
+      const cells=d.POS.map(p=>'<td class="num'+(r[p]===mx&&mx>0?" hot":"")+'">'+fmt(r[p],1)+'</td>').join("");
+      return '<tr'+cls+'><td class="l">'+t.name+'</td>'+cells+'<td class="num">'+fmt(t.total,1)+'</td></tr>';
+    }).join("");
+    const table='<div class="sec-title">Starter points by position</div>'+
+      '<div class="panel" style="padding:4px 8px"><table><thead><tr><th class="l">Team</th>'+
+      d.POS.map(p=>'<th>'+p+'</th>').join("")+'<th>Total</th></tr></thead><tbody>'+rowsT+'</tbody></table></div>'+
+      '<p class="note">Points from starters only, across completed weeks. Highlighted = the top-scoring position for that team. RB and WR usually lead because the lineup starts more of them; the radar below removes that by comparing each position to the rest of the league.</p>';
+    const opts=STATE.teams.slice().sort((a,b)=>a.name.localeCompare(b.name)).map(t=>'<option value="'+t.rid+'"'+(t.rid===selectedScoringRid?" selected":"")+'>'+t.name+'</option>').join("");
+    const sel='<div style="margin:4px 0 10px"><select id="scoringTeamSel" style="background:var(--panel2);color:var(--ink);border:1px solid var(--line);border-radius:6px;padding:6px 8px;font-size:13px">'+opts+'</select></div>';
+    const idx=d.index[selectedScoringRid]; const vals=d.POS.map(p=>idx[p]);
+    const radar='<div class="sec-title">Position strength vs the league</div>'+sel+
+      '<div class="panel">'+radarSVG(d.POS, vals, max)+
+      '<p class="note" style="text-align:center">Each axis shows this team points at that position as an index to the field (the other nine teams). 100 (dashed ring) = league average. Outside the ring is above average, inside is below.'+
+      (STATE.played<4?' <span style="color:var(--warn)">This early the splits are noisy; one big week swings an axis hard.</span>':'')+'</p></div>';
+    $("scoringOut").innerHTML=table+radar;
+    const se=$("scoringTeamSel"); if(se){ se.addEventListener("change",()=>{ selectedScoringRid=Number(se.value); renderScoring(); }); }
+    SCORING_RENDERED=true;
+  }
+  async function ensureScoring(){
+    if(!STATE){ $("scoringOut").innerHTML='<div class="warn-box">Load the league first: hit Refresh from Sleeper on the Projections tab.</div>'; return; }
+    if((STATE.played||0)===0){ $("scoringOut").innerHTML='<div class="warn-box">No completed weeks yet. Position scoring appears once a week has finalised.</div>'; return; }
+    if(SCORING_RENDERED && PLAYERS){ return; }
+    if(!PLAYERS){
+      $("scoringOut").innerHTML='<div class="note">Loading player positions (about 5MB, one-off for this session)...</div>';
+      try{ PLAYERS=await getPlayers(); }
+      catch(e){ console.error(e); $("scoringOut").innerHTML='<div class="warn-box">Could not load the player file: '+e.message+'. It uses the same Sleeper connection as Refresh, so if that works this will too.</div>'; return; }
+    }
+    renderScoring();
+  }
+  function doSim(){
+    if(!STATE){ return; }
+    saveCfg();
+    const cfg={ nSims:Number($("nSims").value)||10000, k:Number($("kVal").value), proj:{} };
+    document.querySelectorAll("#projBody input").forEach(inp=>{ if(inp.value.trim()!=="") cfg.proj[inp.dataset.team]=Number(inp.value); });
+    STATE.nSims=cfg.nSims;
+    applyMeans(STATE, cfg);
+    const sdOverride=$("sdVal").value.trim();
+    let sd, sdAuto;
+    if(sdOverride!==""){ sd=Number(sdOverride); sdAuto=false; }
+    else { const c=computeSd(STATE); sd=c.sd; sdAuto=c.auto; }
+
+    setStatus("Running "+cfg.nSims.toLocaleString()+" simulations…");
+    $("simBtn").disabled=true; $("fetchBtn").disabled=true;
+    setTimeout(()=>{
+      let out="";
+      try{
+        if(STATE.remainingWeeks.length===0){
+          out+='<div class="warn-box">No remaining regular-season weeks found, so there is nothing to project. The ladder below is final for the regular season.</div>';
+          out+=renderLadder(STATE);
+        } else {
+          const res=runSim(STATE, cfg, sd);
+          out+=renderModelNote(STATE, sd, sdAuto);
+          out+=renderHeadline(res, STATE);
+          out+=renderLadder(STATE);
+          out+=renderProjected(res, STATE);
+          out+=renderBracket(res, STATE, sd);
+        }
+        $("output").innerHTML=out;
+        setStatus("Done. "+cfg.nSims.toLocaleString()+" sims.", "ok");
+      }catch(e){
+        console.error(e);
+        setStatus("Simulation error: "+e.message, "err");
+      }
+      $("simBtn").disabled=false; $("fetchBtn").disabled=false;
+    },40);
+  }
+
+  function ingest(bundle, fromCache){
+    STATE=buildState(bundle);
+    SCORING_RENDERED=false;
+    const cfg=loadCfg();
+    renderProjInputs(STATE, cfg);
+    $("metaPill").textContent=STATE.leagueName+" · "+STATE.season+" · wk "+(STATE.played+ (STATE.remainingWeeks.length?"+":""))+" · "+STATE.teams.length+" teams";
+    $("simBtn").disabled=false;
+
+    const fb=$("fallback"); let warn="";
+    if(STATE.hasDivisions){
+      warn += "This league has "+STATE.divisions+" divisions. The current seeding ranks by overall record and ignores division-winner rules, so playoff seeds and odds may be off. Tell me and I'll add division seeding. ";
+    }
+    if(STATE.scheduleGaps.length>0){
+      warn += "Sleeper didn't return full matchups for week(s) "+STATE.scheduleGaps.join(", ")+"; those weeks are skipped in the simulation.";
+    }
+    if(warn){ fb.style.display="block"; fb.textContent=warn; } else { fb.style.display="none"; }
+
+    const src=fromCache?("cached data from "+new Date(bundle.__t||Date.now()).toLocaleString()):"live data";
+    setStatus("Loaded "+src+". Running simulation…", "ok");
+    doSim();
+  }
+
+  async function fetchNow(){
+    saveCfg();
+    const id=$("leagueId").value.trim();
+    if(!id){ setStatus("Enter a league ID first.", "err"); return; }
+    $("fetchBtn").disabled=true; $("simBtn").disabled=true;
+    try{
+      const bundle=await fetchLeague(id);
+      saveCache(bundle);
+      ingest(bundle, false);
+    }catch(e){
+      console.error(e);
+      setStatus("Fetch failed: "+e.message+"\nOpen the Admin tab for the fix. If cached data exists you can still run on that.", "err");
+      $("tab-admin").classList.add("alert");
+    } finally {
+      $("fetchBtn").disabled=false;
+      if(STATE) $("simBtn").disabled=false;
+    }
+  }
+
+  function showTab(p){
+    document.querySelectorAll(".tab").forEach(b=>b.classList.toggle("active", b.dataset.pane===p));
+    document.querySelectorAll(".tabpane").forEach(el=>el.style.display="none");
+    const pane=$("pane-"+p); if(pane) pane.style.display="block";
+    if(p==="admin") $("tab-admin").classList.remove("alert");
+    if(p==="scoring") ensureScoring();
+  }
+  document.querySelectorAll(".tab").forEach(b=>b.addEventListener("click", ()=>showTab(b.dataset.pane)));
+
+  $("fetchBtn").addEventListener("click", fetchNow);
+  $("simBtn").addEventListener("click", doSim);
+  $("adminRunBtn").addEventListener("click", ()=>{ showTab("main"); doSim(); });
+  $("adminFetchBtn").addEventListener("click", ()=>{ showTab("main"); fetchNow(); });
+  ["leagueId","myTeam","nSims","kVal","sdVal"].forEach(idv=>$(idv).addEventListener("change", saveCfg));
+
+  loadCfg();
+  const cache=loadCache();
+  if(cache && cache.bundle){
+    cache.bundle.__t=cache.t;
+    try{ ingest(cache.bundle, true); }
+    catch(e){ setStatus("Cached data couldn't be read. Hit Refresh.", "err"); }
+  }
+})();
+</script>
+</body>
+</html>
