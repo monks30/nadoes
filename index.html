@@ -615,7 +615,7 @@
       const L=pt(i,R+15); const anchor=Math.abs(L[0]-cx)<6?"middle":(L[0]>cx?"start":"end"); const v=values[i];
       labs+='<text class="radar-lab" x="'+L[0].toFixed(1)+'" y="'+L[1].toFixed(1)+'" text-anchor="'+anchor+'">'+lb+'</text>';
       labs+='<text class="radar-val" x="'+L[0].toFixed(1)+'" y="'+(L[1]+12).toFixed(1)+'" text-anchor="'+anchor+'">'+(v==null?"n/a":Math.round(v))+'</text>'; });
-    const dp=values.map((v,i)=>{ const vv=Math.min(v==null?0:v,max); return pt(i,R*vv/max).map(x=>x.toFixed(1)).join(","); }).join(" ");
+    const dp=values.map((v,i)=>{ const vv=Math.max(0,Math.min(v==null?0:v,max)); return pt(i,R*vv/max).map(x=>x.toFixed(1)).join(","); }).join(" ");
     return '<svg viewBox="0 0 300 305" class="radar">'+grid+spokes+'<polygon class="radar-data" points="'+dp+'"></polygon>'+labs+'</svg>';
   }
   function renderScoring(){
@@ -638,7 +638,7 @@
     const idx=d.index[selectedScoringRid]; const vals=d.POS.map(p=>idx[p]);
     const radar='<div class="sec-title">Position strength vs the league</div>'+sel+
       '<div class="panel">'+radarSVG(d.POS, vals, max)+
-      '<p class="note" style="text-align:center">Each axis shows this team points at that position as an index to the field (the other nine teams). 100 (dashed ring) = league average. Outside the ring is above average, inside is below.'+
+      '<p class="note" style="text-align:center">Each axis shows this team points at that position as an index to the field (the other nine teams). 100 (dashed ring) = league average. Outside the ring is above average, inside is below; a defence that scored below zero in a week sits at the centre, with the true figure on the axis.'+
       (STATE.played<4?' <span style="color:var(--warn)">This early the splits are noisy; one big week swings an axis hard.</span>':'')+'</p></div>';
     $("scoringOut").innerHTML=table+radar;
     const se=$("scoringTeamSel"); if(se){ se.addEventListener("change",()=>{ selectedScoringRid=Number(se.value); renderScoring(); }); }
