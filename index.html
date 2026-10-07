@@ -94,6 +94,35 @@
   .nst .radar-data{ fill:rgba(78,161,255,.20); stroke:var(--accent); stroke-width:2; }
   .nst .radar-lab{ fill:var(--ink); font-size:11px; font-weight:600; }
   .nst .radar-val{ fill:var(--dim); font-size:10px; }
+  /* luck, matchups, moves, phone */
+  .nst .panel{ overflow-x:auto; }
+  .nst td.num{ white-space:nowrap; }
+  .nst td.up{ color:var(--warn); font-weight:600; }
+  .nst td.down{ color:var(--accent); font-weight:600; }
+  .nst .mu{ display:grid; grid-template-columns:1fr auto 1fr; gap:8px; align-items:center;
+            padding:9px 0; border-bottom:1px solid var(--line); font-size:13px; }
+  .nst .mu:last-child{ border-bottom:0; }
+  .nst .mu-side{ display:flex; flex-direction:column; }
+  .nst .mu-side.r{ text-align:right; }
+  .nst .mu-side.fav .mu-name{ font-weight:700; }
+  .nst .mu-num{ color:var(--dim); font-size:12px; font-variant-numeric:tabular-nums; }
+  .nst .mu-side.fav .mu-num{ color:var(--good); }
+  .nst .mu-v{ color:var(--dim); font-size:11px; }
+  .nst .mu.mine{ background:var(--mine); border-radius:6px; padding-left:8px; padding-right:8px; }
+  .nst .tag{ display:inline-block; font-size:10.5px; padding:1px 6px; border-radius:10px;
+             background:var(--panel2); border:1px solid var(--line); color:var(--dim); white-space:nowrap; }
+  .nst select{ background:var(--panel2); color:var(--ink); border:1px solid var(--line);
+               border-radius:6px; padding:6px 8px; font-size:13px; }
+  @media (max-width:640px){
+    .nst .wrap{ padding:14px 12px 50px; }
+    .nst table{ font-size:12px; }
+    .nst th, .nst td{ padding:6px 5px; }
+    .nst .grid2{ grid-template-columns:1fr; }
+    .nst .tab{ padding:9px 10px; }
+    .nst .card{ min-width:calc(50% - 6px); padding:12px; }
+    .nst .card.champ{ min-width:100%; }
+    .nst .card .big{ font-size:16px; }
+  }
 </style>
 </head>
 <body class="nst">
@@ -104,6 +133,7 @@
   <div class="tabs">
     <button class="tab active" id="tab-main" data-pane="main">Projections</button>
     <button class="tab" id="tab-scoring" data-pane="scoring">Scoring</button>
+    <button class="tab" id="tab-moves" data-pane="moves">Moves</button>
     <button class="tab" id="tab-admin" data-pane="admin">Admin</button>
   </div>
 
@@ -120,6 +150,10 @@
 
   <div class="tabpane" id="pane-scoring" style="display:none">
     <div id="scoringOut"><div class="note">Open this tab after a refresh to load position scoring.</div></div>
+  </div>
+
+  <div class="tabpane" id="pane-moves" style="display:none">
+    <div id="movesOut"><div class="note">Open this tab after a refresh to load transactions.</div></div>
   </div>
 
   <div class="tabpane" id="pane-admin" style="display:none">
@@ -247,7 +281,8 @@
       const pf = (st.fpts||0) + (st.fpts_decimal||0)/100;
       const pa = (st.fpts_against||0) + (st.fpts_against_decimal||0)/100;
       return { rid:r.roster_id, name, wins:st.wins||0, losses:st.losses||0, ties:st.ties||0,
-               pf, pa, division:(st.division||null) };
+               pf, pa, division:(st.division||null), players:(r.players||[]),
+               faabUsed:(st.waiver_budget_used!=null?Number(st.waiver_budget_used):null) };
     });
     const byRid = {}; teams.forEach(t=>byRid[t.rid]=t);
 
@@ -286,7 +321,7 @@
       });
     });
 
-    return { teams, byRid, playoffTeams, leagueAverageMatch, divisions, hasDivisions:divisions>=2, matchups, rosterPositions:(league.roster_positions||[]),
+    return { teams, byRid, playoffTeams, leagueAverageMatch, divisions, hasDivisions:divisions>=2, matchups, rosterPositions:(league.roster_positions||[]), waiverType:(s.waiver_type), waiverBudget:(s.waiver_budget||0),
              regWeeks, completedWeeks, remainingWeeks, scoresByWeek, schedule, scheduleGaps,
              played, leagueMean, leagueName: league.name || "League", season: league.season || "" };
   }
@@ -466,20 +501,69 @@
     });
     let rows="";
     teams.forEach((t,i)=>{
+      const games=t.wins+t.losses+t.ties;
       const apGames=t.apW+t.apL+t.apT;
-      const apPct=apGames?(t.apW/apGames*100):null;
+      const apFrac=apGames?(t.apW+0.5*t.apT)/apGames:null;
+      const expW=apFrac==null?null:apFrac*games;
+      const luck=expW==null?null:(t.wins+0.5*t.ties)-expW;
+      t.expW=expW; t.luck=luck;
       const rec=t.wins+"-"+t.losses+(t.ties?("-"+t.ties):"");
       const cls=mineMatch(t.name)?' class="mine"':"";
+      const lc=luck==null?"":(luck>0.5?" up":(luck<-0.5?" down":""));
+      const ls=luck==null?"—":((luck>0?"+":"")+luck.toFixed(1));
       rows+='<tr'+cls+'><td class="l num">'+(i+1)+'</td><td class="l">'+t.name+'</td>'+
         '<td class="num">'+rec+'</td><td class="num">'+fmt(t.pf,2)+'</td><td class="num">'+fmt(t.pa,2)+'</td>'+
         '<td class="num">'+t.apW+'-'+t.apL+(t.apT?('-'+t.apT):'')+'</td>'+
-        '<td class="num">'+(apPct==null?'—':apPct.toFixed(0)+'%')+'</td></tr>';
+        '<td class="num">'+(apFrac==null?'—':(apFrac*100).toFixed(0)+'%')+'</td>'+
+        '<td class="num">'+fmt(expW,1)+'</td><td class="num'+lc+'">'+ls+'</td></tr>';
     });
     return '<div class="sec-title">Ladder (actual)</div>'+
       '<div class="panel" style="padding:4px 8px"><table><thead><tr>'+
       '<th class="l">#</th><th class="l">Team</th><th>W-L</th><th>PF</th><th>PA</th>'+
-      '<th>All-play</th><th>All-play%</th></tr></thead><tbody>'+rows+'</tbody></table></div>'+
-      '<p class="note">All-play = record if every team played every other team each week. It strips out schedule luck.</p>';
+      '<th>All-play</th><th>All-play%</th><th>Exp W</th><th>Luck</th></tr></thead><tbody>'+rows+'</tbody></table></div>'+
+      '<p class="note">All-play = record if every team played every other team each week. Exp W = the wins a team\'s scoring has earned (all-play % times games played). Luck = actual wins minus Exp W. Amber (+) = lucky, likely to drop back. Blue (−) = unlucky, due to climb.</p>';
+  }
+
+  function renderMatchups(state, sd){
+    const wk=state.remainingWeeks[0];
+    const games=(state.schedule[wk]||[]).map(g=>{
+      const A=state.byRid[g[0]], B=state.byRid[g[1]]; if(!A||!B) return null;
+      return {A,B,pA:pWin(A.mean,B.mean,sd)};
+    }).filter(Boolean);
+    if(!games.length) return '';
+    games.sort((x,y)=>{
+      const mx=(mineMatch(x.A.name)||mineMatch(x.B.name))?0:1, my=(mineMatch(y.A.name)||mineMatch(y.B.name))?0:1;
+      if(mx!==my) return mx-my; return Math.abs(x.pA-0.5)-Math.abs(y.pA-0.5);
+    });
+    const side=(T,p,right)=>'<div class="mu-side'+(right?' r':'')+(p>=0.5?' fav':'')+'"><span class="mu-name">'+T.name+'</span>'+
+      '<span class="mu-num">'+fmt(T.mean,1)+' · '+pct(p*100)+'%</span></div>';
+    const rows=games.map(g=>'<div class="mu'+((mineMatch(g.A.name)||mineMatch(g.B.name))?' mine':'')+'">'+
+      side(g.A,g.pA,false)+'<div class="mu-v">v</div>'+side(g.B,1-g.pA,true)+'</div>').join('');
+    return '<div class="sec-title">Week '+wk+' matchups</div><div class="panel">'+rows+'</div>'+
+      '<p class="note">Projected score is each team\'s blended scoring average, not this week\'s lineup, so it does not know about byes or injuries. Closest games listed first, yours at the top.</p>';
+  }
+
+  function renderSchedule(state){
+    const rows=state.teams.map(t=>{
+      const opps=[];
+      state.remainingWeeks.forEach(w=>{ (state.schedule[w]||[]).forEach(g=>{
+        if(g[0]===t.rid) opps.push(g[1]); else if(g[1]===t.rid) opps.push(g[0]); }); });
+      const others=state.teams.filter(o=>o.rid!==t.rid);
+      const field=others.length?others.reduce((a,o)=>a+o.mean,0)/others.length:0;
+      const avg=opps.length?opps.reduce((a,r)=>a+(state.byRid[r]?state.byRid[r].mean:0),0)/opps.length:null;
+      return {t, n:opps.length, avg, diff:avg==null?null:avg-field, next:opps.length?state.byRid[opps[0]]:null};
+    }).sort((a,b)=>(b.diff==null?-1e9:b.diff)-(a.diff==null?-1e9:a.diff));
+    const body=rows.map((r,i)=>{
+      const cls=mineMatch(r.t.name)?' class="mine"':"";
+      const dc=r.diff==null?"":(r.diff>2?" up":(r.diff<-2?" down":""));
+      return '<tr'+cls+'><td class="l num">'+(i+1)+'</td><td class="l">'+r.t.name+'</td><td class="num">'+r.n+'</td>'+
+        '<td class="num">'+fmt(r.avg,1)+'</td><td class="num'+dc+'">'+(r.diff==null?'—':((r.diff>0?'+':'')+r.diff.toFixed(1)))+'</td>'+
+        '<td class="l">'+(r.next?r.next.name:'—')+'</td></tr>';
+    }).join('');
+    return '<div class="sec-title">Remaining schedule strength</div>'+
+      '<div class="panel" style="padding:4px 8px"><table><thead><tr><th class="l">#</th><th class="l">Team</th><th>Left</th>'+
+      '<th>Avg opp</th><th>vs field</th><th class="l">Next</th></tr></thead><tbody>'+body+'</tbody></table></div>'+
+      '<p class="note">Avg opp = average projected score of the teams still to play. vs field = points per week tougher (+) or easier (−) than facing a typical opponent. Typical means the other nine teams, since you never play yourself, so the same opponents count as tougher for a strong team than a weak one. 1 = hardest run home.</p>';
   }
 
   function renderProjected(res, state){
@@ -640,7 +724,10 @@
       '<div class="panel">'+radarSVG(d.POS, vals, max)+
       '<p class="note" style="text-align:center">Each axis shows this team points at that position as an index to the field (the other nine teams). 100 (dashed ring) = league average. Outside the ring is above average, inside is below; a defence that scored below zero in a week sits at the centre, with the true figure on the axis.'+
       (STATE.played<4?' <span style="color:var(--warn)">This early the splits are noisy; one big week swings an axis hard.</span>':'')+'</p></div>';
-    $("scoringOut").innerHTML=table+radar;
+    const trade=renderTradeFinder(d, selectedScoringRid);
+    const cons=renderConsistency(STATE);
+    const eff=renderEfficiency(STATE);
+    $("scoringOut").innerHTML=table+radar+trade+cons+eff;
     const se=$("scoringTeamSel"); if(se){ se.addEventListener("change",()=>{ selectedScoringRid=Number(se.value); renderScoring(); }); }
     SCORING_RENDERED=true;
   }
@@ -649,6 +736,284 @@
     if((STATE.played||0)===0){ $("scoringOut").innerHTML='<div class="warn-box">No completed weeks yet. Position scoring appears once a week has finalised.</div>'; return; }
     if(startingBuckets(STATE).length===0){ $("scoringOut").innerHTML='<div class="warn-box">Roster layout not returned by Sleeper, so positions cannot be read. Try a refresh.</div>'; return; }
     renderScoring();
+    if(!NAMES){ loadNames().then(()=>{ if(NAMES && $("pane-scoring").style.display!=="none") renderScoring(); }); }
+  }
+
+  // ---------- trade partner finder ----------
+  function renderTradeFinder(d, rid){
+    const core=["QB","RB","WR","TE"].filter(p=>d.POS.indexOf(p)>=0);
+    const me=STATE.byRid[rid]; if(!me) return '';
+    const dev=(r,p)=>{ const v=d.index[r][p]; return v==null?0:v-100; };
+    const fits=STATE.teams.filter(t=>t.rid!==rid).map(t=>{
+      let give=null, get=null;
+      core.forEach(p=>{
+        const a=dev(rid,p), b=dev(t.rid,p);
+        if(a>0 && b<0){ const g=Math.min(a,-b); if(!give||g>give.v) give={p,v:g,a,b}; }
+        if(a<0 && b>0){ const g=Math.min(-a,b); if(!get||g>get.v) get={p,v:g,a,b}; }
+      });
+      return {t, give, get, score:(give&&get)?Math.min(give.v,get.v):0};
+    }).filter(x=>x.score>0).sort((x,y)=>y.score-x.score).slice(0,3);
+    const sg=v=>(v>0?'+':'')+Math.round(v);
+    const rows=fits.map(x=>'<tr><td class="l"><b>'+x.t.name+'</b></td>'+
+      '<td class="l">'+x.give.p+' <span class="muted">(you '+sg(x.give.a)+', them '+sg(x.give.b)+')</span></td>'+
+      '<td class="l">'+x.get.p+' <span class="muted">(them '+sg(x.get.b)+', you '+sg(x.get.a)+')</span></td>'+
+      '<td class="num">'+Math.round(x.score)+'</td></tr>').join('');
+    return '<div class="sec-title">Trade partners for '+me.name+'</div>'+
+      (fits.length?('<div class="panel" style="padding:4px 8px"><table><thead><tr><th class="l">Team</th><th class="l">You send</th><th class="l">You get</th><th>Fit</th></tr></thead><tbody>'+rows+'</tbody></table></div>')
+        :'<div class="panel note" style="margin-top:0">No clear match yet: no team is strong where this team is weak and weak where it is strong.</div>')+
+      '<p class="note">Figures are points above (+) or below (−) league average at that position, as a % (the radar index minus 100). A good partner has a surplus where you are short and a shortfall where you are deep. Fit = the smaller of the two gaps, so both sides need the deal. QB, RB, WR and TE only. This finds who to talk to, not what a fair trade is.</p>';
+  }
+
+  // ---------- consistency ----------
+  function renderConsistency(state){
+    if(state.played<2) return '<div class="sec-title">Consistency</div><div class="panel note" style="margin-top:0">Needs at least two completed weeks.</div>';
+    const rows=state.teams.map(t=>{
+      const xs=state.completedWeeks.map(w=>state.scoresByWeek[w][t.rid]).filter(v=>v!=null);
+      const m=xs.reduce((a,v)=>a+v,0)/xs.length;
+      const sd=xs.length>1?Math.sqrt(xs.reduce((a,v)=>a+(v-m)*(v-m),0)/(xs.length-1)):0;
+      return {t, m, sd, lo:Math.min.apply(null,xs), hi:Math.max.apply(null,xs)};
+    });
+    const sds=rows.map(r=>r.sd).sort((a,b)=>a-b); const med=sds[Math.floor(sds.length/2)];
+    rows.sort((a,b)=>a.sd-b.sd);
+    const body=rows.map(r=>{
+      const lab=r.sd<0.8*med?'Steady':(r.sd>1.2*med?'Swingy':'Normal');
+      const cls=mineMatch(r.t.name)?' class="mine"':'';
+      return '<tr'+cls+'><td class="l">'+r.t.name+'</td><td class="num">'+fmt(r.m,1)+'</td><td class="num">'+fmt(r.sd,1)+'</td>'+
+        '<td class="num">'+fmt(r.lo,1)+'</td><td class="num">'+fmt(r.hi,1)+'</td><td class="l"><span class="tag">'+lab+'</span></td></tr>';
+    }).join('');
+    return '<div class="sec-title">Consistency</div><div class="panel" style="padding:4px 8px"><table><thead><tr>'+
+      '<th class="l">Team</th><th>Avg</th><th>Spread</th><th>Low</th><th>High</th><th class="l">Type</th></tr></thead><tbody>'+body+'</tbody></table></div>'+
+      '<p class="note">Spread = how far a typical week lands from the team\'s average (standard deviation). Steadiest at the top. Steady teams make safer favourites; swingy teams pull more upsets and suffer more of them. Steady and Swingy are relative to this league (20% below or above the middle team).'+(state.played<4?' <span style="color:var(--warn)">With only '+state.played+' weeks, one big score moves these a lot.</span>':'')+'</p>';
+  }
+
+  // ---------- manager efficiency ----------
+  const ELIG={QB:["QB"],RB:["RB"],WR:["WR"],TE:["TE"],K:["K"],DEF:["DEF"],DST:["DEF"],
+    FLEX:["RB","WR","TE"],WRRB_FLEX:["RB","WR"],REC_FLEX:["WR","TE"],SUPER_FLEX:["QB","RB","WR","TE"]};
+  function posOf(pid){
+    if(NAMES && NAMES[pid] && NAMES[pid][1]) return NAMES[pid][1]==="DST"?"DEF":NAMES[pid][1];
+    if(/^[A-Z]{2,3}$/.test(String(pid))) return "DEF";
+    return null;
+  }
+  function optimalPoints(slotCodes, cands){
+    const order=slotCodes.map(c=>({c, el:ELIG[c]||[]})).filter(x=>x.el.length).sort((a,b)=>a.el.length-b.el.length);
+    const used={}; let total=0;
+    order.forEach(sl=>{ let best=null;
+      cands.forEach(p=>{ if(used[p.pid]||sl.el.indexOf(p.pos)<0) return; if(!best||p.pts>best.pts) best=p; });
+      if(best){ used[best.pid]=1; total+=best.pts; } });
+    return total;
+  }
+  function computeEfficiency(state){
+    const skip={BN:1,IR:1,TAXI:1};
+    const slotCodes=(state.rosterPositions||[]).filter(c=>!skip[c]);
+    const T={}; state.teams.forEach(t=>T[t.rid]={act:0,opt:0,weeks:0,lost:0,perfect:0,unknown:0});
+    state.completedWeeks.forEach(w=>{
+      const rows=(state.matchups[w]||[]);
+      const wk={};
+      rows.forEach(row=>{
+        const pp=row.players_points||{}, starters=row.starters||[], sp=row.starters_points||[];
+        const cands=[], seen={};
+        starters.forEach((pid,i)=>{ if(!pid||pid==="0") return; seen[pid]=1;
+          const el=ELIG[slotCodes[i]]; let pos=posOf(pid); if(!pos && el && el.length===1) pos=el[0];
+          const pts=Number(sp[i]!=null?sp[i]:(pp[pid]||0))||0;
+          if(pos) cands.push({pid,pos,pts}); else T[row.roster_id]&&T[row.roster_id].unknown++; });
+        (row.players||[]).forEach(pid=>{ if(seen[pid]) return; const pos=posOf(pid); const pts=Number(pp[pid]||0)||0;
+          if(pos) cands.push({pid,pos,pts}); else if(pts>0 && T[row.roster_id]) T[row.roster_id].unknown++; });
+        const act=Number(row.points)||0;
+        const opt=Math.max(act, optimalPoints(slotCodes,cands));
+        wk[row.roster_id]={act,opt,mid:row.matchup_id};
+      });
+      Object.keys(wk).forEach(r=>{ const x=wk[r], t=T[r]; if(!t) return;
+        t.act+=x.act; t.opt+=x.opt; t.weeks++; if(x.opt-x.act<0.5) t.perfect++;
+        const opp=Object.keys(wk).find(o=>o!==r && wk[o].mid===x.mid);
+        if(opp && x.act<wk[opp].act && x.opt>wk[opp].act) t.lost++; });
+    });
+    return state.teams.map(t=>Object.assign({t}, T[t.rid], {eff:T[t.rid].opt>0?T[t.rid].act/T[t.rid].opt*100:null}));
+  }
+  function renderEfficiency(state){
+    const head='<div class="sec-title">Manager efficiency</div>';
+    if(!NAMES) return head+'<div class="panel note" style="margin-top:0">Loading player positions to rebuild each team\'s best possible lineup (one download a day, then saved on this device)…</div>';
+    const rows=computeEfficiency(state).sort((a,b)=>(b.eff||0)-(a.eff||0));
+    const body=rows.map(r=>{
+      const cls=mineMatch(r.t.name)?' class="mine"':'';
+      return '<tr'+cls+'><td class="l">'+r.t.name+'</td><td class="num"><b>'+fmt(r.eff,1)+'%</b></td><td class="num">'+fmt(r.act,1)+'</td><td class="num">'+fmt(r.opt,1)+'</td>'+
+        '<td class="num">'+fmt(r.weeks?(r.opt-r.act)/r.weeks:null,1)+'</td><td class="num">'+r.lost+'</td><td class="num">'+r.perfect+'</td></tr>';
+    }).join('');
+    const unk=rows.reduce((a,r)=>a+r.unknown,0);
+    return head+'<div class="panel" style="padding:4px 8px"><table><thead><tr><th class="l">Team</th><th>Efficiency</th><th>Scored</th><th>Best possible</th>'+
+      '<th>Bench pts/wk</th><th>Lost to lineup</th><th>Perfect wks</th></tr></thead><tbody>'+body+'</tbody></table></div>'+
+      '<p class="note">Efficiency = points scored as a share of the most the roster could have scored with the best legal lineup each week, picked with hindsight. Nobody hits 100% over a season; mid-90s is strong. Lost to lineup = losses the best lineup would have won. A high-scoring team with low efficiency is better than its results; a low-scoring team at high efficiency is getting everything out of a thin roster.'+
+      (unk?' '+unk+' player-weeks had no known position and were left out.':'')+'</p>';
+  }
+  // ---------- moves / transactions / roster tenure ----------
+  const DAY=86400000;
+  let MOVES_CALC=null, NAMES=null, movesSel=null;
+  async function fetchMovesData(id){
+    const rounds=[]; for(let w=1;w<=18;w++) rounds.push(w);
+    let errs=0;
+    const tx=await Promise.all(rounds.map(w=>getJSON("/league/"+id+"/transactions/"+w).catch(()=>{ errs++; return []; })));
+    if(errs===rounds.length) throw new Error("transactions unavailable");
+    const txns=[]; tx.forEach((arr,i)=>{ (arr||[]).forEach(x=>{ x.__leg=x.leg||rounds[i]; txns.push(x); }); });
+    let draft=null, picks=[];
+    try{
+      const drafts=await getJSON("/league/"+id+"/drafts");
+      const ds=(drafts||[]).slice().sort((a,b)=>(b.start_time||0)-(a.start_time||0));
+      draft=ds.find(d=>d.status==="complete")||ds[0]||null;
+      if(draft) picks=await getJSON("/draft/"+draft.draft_id+"/picks");
+    }catch(e){ console.warn("draft fetch failed", e); }
+    return {txns, draft, picks, t:Date.now()};
+  }
+  async function loadNames(){
+    if(NAMES) return NAMES;
+    let cached=null; try{ cached=JSON.parse(localStorage.getItem(LS+".names")); }catch(e){}
+    if(cached && cached.map && (Date.now()-cached.t)<DAY){ NAMES=cached.map; return NAMES; }
+    try{
+      const res=await fetch(BASE+"/players/nfl"); if(!res.ok) throw new Error("HTTP "+res.status);
+      const all=await res.json(); const map={};
+      for(const id in all){ const p=all[id]; if(!p) continue;
+        const n=p.full_name||((p.first_name||"")+" "+(p.last_name||"")).trim(); if(!n) continue;
+        map[id]=[n, p.position||""]; }
+      NAMES=map;
+      try{ localStorage.setItem(LS+".names", JSON.stringify({t:Date.now(), map})); }catch(e){}
+      return NAMES;
+    }catch(e){ console.warn("names fetch failed", e); if(cached && cached.map){ NAMES=cached.map; return NAMES; } return null; }
+  }
+  function playerInfo(pid, meta){
+    if(NAMES && NAMES[pid]) return {n:NAMES[pid][0], p:NAMES[pid][1]};
+    if(meta[pid]) return meta[pid];
+    if(/^[A-Z]{2,3}$/.test(String(pid))) return {n:pid+" DEF", p:"DEF"};
+    return {n:"Player "+pid, p:""};
+  }
+  function computeMoves(state, data, now){
+    const c={}; state.teams.forEach(t=>c[t.rid]={waiver:0,fa:0,trade:0,drops:0,failed:0,faab:0,moves:0,stints:[]});
+    const meta={};
+    (data.picks||[]).forEach(p=>{ const m=p.metadata||{}; const n=((m.first_name||"")+" "+(m.last_name||"")).trim();
+      if(p.player_id && n) meta[p.player_id]={n, p:m.position||""}; });
+    const draftT=(data.draft && (data.draft.start_time||data.draft.last_picked)) || null;
+    const seen={};
+    const txns=(data.txns||[]).filter(x=>{ const k=x.transaction_id||JSON.stringify([x.created,x.adds,x.drops]);
+      if(seen[k]) return false; seen[k]=1; return true; });
+    const when=x=>x.status_updated||x.created||0;
+    txns.sort((a,b)=>when(a)-when(b));
+    const open={};
+    (data.picks||[]).forEach(p=>{ if(p.player_id && c[p.roster_id])
+      open[p.player_id]={rid:p.roster_id, start:draftT||now, via:p.is_keeper?"Keeper":"Draft"}; });
+    const label={waiver:"Waiver", free_agent:"Free agent", trade:"Trade", commissioner:"Commish"};
+    const log=[];
+    txns.forEach(x=>{
+      const t=when(x), type=x.type, r0=(x.roster_ids||[])[0];
+      if(x.status==="failed"){ if(type==="waiver" && c[r0]) c[r0].failed++; return; }
+      if(x.status!=="complete") return;
+      const bid=Number((x.settings && x.settings.waiver_bid)||0);
+      if(type==="waiver"){ if(c[r0]){ c[r0].waiver++; c[r0].moves++; c[r0].faab+=bid; } }
+      else if(type==="free_agent"){ if(c[r0]){ c[r0].fa++; c[r0].moves++; } }
+      else if(type==="trade"){ (x.roster_ids||[]).forEach(r=>{ if(c[r]){ c[r].trade++; c[r].moves++; } }); }
+      else { (x.roster_ids||[]).forEach(r=>{ if(c[r]) c[r].moves++; }); }
+      const drops=x.drops||{}, adds=x.adds||{};
+      Object.keys(drops).forEach(pid=>{ const r=drops[pid];
+        if(type!=="trade" && c[r]) c[r].drops++;
+        const o=open[pid]; if(o && o.rid===r){ if(c[r]) c[r].stints.push({pid, start:o.start, end:t, via:o.via}); delete open[pid]; } });
+      Object.keys(adds).forEach(pid=>{ const r=adds[pid], o=open[pid];
+        if(o && o.rid!==r && c[o.rid]) c[o.rid].stints.push({pid, start:o.start, end:t, via:o.via});
+        if(c[r]) open[pid]={rid:r, start:t, via:label[type]||type}; else delete open[pid]; });
+      log.push({t, leg:x.__leg, type, label:label[type]||type, rids:x.roster_ids||[], adds, drops, bid});
+    });
+    const teams=state.teams.map(t=>{
+      const cc=c[t.rid];
+      const roster=(t.players||[]).map(pid=>{
+        const o=open[pid]; let start, via;
+        if(o && o.rid===t.rid){ start=o.start; via=o.via; } else { start=draftT||now; via="Untracked"; }
+        const info=playerInfo(pid, meta);
+        return {pid, name:info.n, pos:info.p, via, days:Math.max(0,(now-start)/DAY)};
+      }).sort((a,b)=>b.days-a.days);
+      const gone=cc.stints.map(st=>{ const info=playerInfo(st.pid, meta);
+        return {pid:st.pid, name:info.n, days:Math.max(0,(st.end-st.start)/DAY), via:st.via}; });
+      const avg=a=>a.length?a.reduce((x,p)=>x+p.days,0)/a.length:null;
+      const faab=(t.faabUsed!=null)?t.faabUsed:cc.faab;
+      return Object.assign({rid:t.rid, name:t.name}, cc, {faab, roster, gone, avgLife:avg(roster), goneAvg:avg(gone)});
+    });
+    const allRoster=[]; teams.forEach(T=>T.roster.forEach(p=>allRoster.push(Object.assign({team:T.name},p))));
+    const allGone=[]; teams.forEach(T=>T.gone.forEach(p=>allGone.push(Object.assign({team:T.name},p))));
+    const leagueAvg=allRoster.length?allRoster.reduce((a,p)=>a+p.days,0)/allRoster.length:null;
+    const longest=allRoster.slice().sort((a,b)=>b.days-a.days)[0]||null;
+    const quickest=allGone.slice().sort((a,b)=>a.days-b.days)[0]||null;
+    const hasFaab=(state.waiverType===2)||teams.some(T=>T.faab>0);
+    return {teams, log:log.reverse(), meta, total:log.length, leagueAvg, longest, quickest, hasFaab, draftOk:!!draftT,
+            untracked:allRoster.filter(p=>p.via==="Untracked").length};
+  }
+  function renderMoves(){
+    const M=MOVES_CALC, out=$("movesOut");
+    const dd=d=>d==null?"—":(d<1?"<1":String(Math.round(d)));
+    const nameOf={}; STATE.teams.forEach(t=>nameOf[t.rid]=t.name);
+    const pn=pid=>playerInfo(pid, M.meta).n;
+    if(movesSel==null){ const mine=STATE.teams.find(t=>mineMatch(t.name)); movesSel=mine?String(mine.rid):"all"; }
+    let html='<div class="bar"><button id="movesRefresh" class="sec">Refresh moves</button>'+
+      '<span class="pill">'+(M.fromCache?'cached ':'')+'as of '+new Date(M.t).toLocaleString("en-AU",{day:"numeric",month:"short",hour:"numeric",minute:"2-digit"})+'</span></div>';
+    if(!M.draftOk) html+='<div class="warn-box">Draft data did not load, so drafted players show no tenure. Refresh moves to retry.</div>';
+    if(!NAMES) html+='<div class="warn-box">Player names did not load, so pickups show as IDs. They fill in once the name file loads.</div>';
+    html+='<div class="cards">'+
+      '<div class="card"><div class="lab">League moves</div><div class="big">'+M.total+'</div><div class="sub2">completed waivers, free-agent adds and trades</div></div>'+
+      '<div class="card"><div class="lab">Average roster life</div><div class="big">'+dd(M.leagueAvg)+' days</div><div class="sub2">how long a current player has been on his team</div></div>'+
+      '<div class="card"><div class="lab">Longest held</div><div class="big" style="font-size:15px">'+(M.longest?M.longest.name:'—')+'</div><div class="sub2">'+(M.longest?(M.longest.team+' · '+dd(M.longest.days)+' days'):'')+'</div></div>'+
+      '<div class="card"><div class="lab">Quickest cut</div><div class="big" style="font-size:15px">'+(M.quickest?M.quickest.name:'—')+'</div><div class="sub2">'+(M.quickest?(M.quickest.team+' · '+dd(M.quickest.days)+' days'):'no drops yet')+'</div></div>'+
+      '</div>';
+    const rows=M.teams.slice().sort((a,b)=>b.moves-a.moves || a.name.localeCompare(b.name)).map(T=>{
+      const cls=mineMatch(T.name)?' class="mine"':'';
+      return '<tr'+cls+'><td class="l">'+T.name+'</td><td class="num">'+T.waiver+'</td><td class="num">'+T.fa+'</td><td class="num">'+T.trade+'</td>'+
+        '<td class="num">'+T.drops+'</td><td class="num">'+T.failed+'</td>'+(M.hasFaab?'<td class="num">$'+Math.round(T.faab)+'</td>':'')+
+        '<td class="num"><b>'+T.moves+'</b></td><td class="num">'+dd(T.avgLife)+'</td><td class="num">'+dd(T.goneAvg)+'</td></tr>';
+    }).join('');
+    html+='<div class="sec-title">Moves by team</div><div class="panel" style="padding:4px 8px"><table><thead><tr>'+
+      '<th class="l">Team</th><th>Waiver</th><th>FA</th><th>Trades</th><th>Drops</th><th>Failed</th>'+(M.hasFaab?'<th>FAAB</th>':'')+
+      '<th>Moves</th><th>Avg life</th><th>Cut avg</th></tr></thead><tbody>'+rows+'</tbody></table></div>'+
+      '<p class="note">Failed = waiver claims that lost out. Avg life = average days the current roster has been on the team. Cut avg = average days a player lasted before being dropped or traded away.</p>';
+    const opts='<option value="all"'+(movesSel==="all"?' selected':'')+'>All teams</option>'+
+      STATE.teams.slice().sort((a,b)=>a.name.localeCompare(b.name)).map(t=>'<option value="'+t.rid+'"'+(String(t.rid)===movesSel?' selected':'')+'>'+t.name+'</option>').join('');
+    html+='<div class="sec-title">Team detail</div><div style="margin:4px 0 10px"><select id="movesSel">'+opts+'</select></div>';
+    if(movesSel!=="all"){
+      const T=M.teams.find(x=>String(x.rid)===movesSel);
+      if(T){
+        const r=T.roster.map(p=>'<tr><td class="l">'+p.name+'</td><td class="l muted">'+(p.pos||'')+'</td><td class="l"><span class="tag">'+p.via+'</span></td><td class="num">'+dd(p.days)+'</td></tr>').join('');
+        html+='<div class="panel" style="padding:4px 8px"><table><thead><tr><th class="l">Player</th><th class="l">Pos</th><th class="l">How</th><th>Days</th></tr></thead><tbody>'+r+'</tbody></table></div>'+
+          '<p class="note">'+T.name+': average roster life '+dd(T.avgLife)+' days; '+T.gone.length+' player'+(T.gone.length===1?'':'s')+' moved on, lasting '+dd(T.goneAvg)+' days on average.</p>';
+      }
+    }
+    const logRows=M.log.filter(e=>movesSel==="all"||e.rids.map(String).indexOf(movesSel)>=0).slice(0,60).map(e=>{
+      const date=new Date(e.t).toLocaleDateString("en-AU",{day:"numeric",month:"short"});
+      let team, added, dropped='';
+      if(e.type==="trade"){
+        team=e.rids.map(r=>nameOf[r]||r).join(' / ');
+        added=Object.keys(e.adds).map(pid=>pn(pid)+' to '+(nameOf[e.adds[pid]]||e.adds[pid])).join(', ');
+      } else {
+        team=nameOf[e.rids[0]]||e.rids[0];
+        added=Object.keys(e.adds).map(pn).join(', ');
+        dropped=Object.keys(e.drops).map(pn).join(', ');
+      }
+      return '<tr><td class="num l">'+e.leg+'</td><td class="l num">'+date+'</td><td class="l">'+team+'</td><td class="l"><span class="tag">'+e.label+'</span></td>'+
+        '<td class="l">'+(added||'—')+'</td><td class="l muted">'+(dropped||'—')+'</td>'+(M.hasFaab?'<td class="num">'+(e.type==="waiver"?'$'+e.bid:'')+'</td>':'')+'</tr>';
+    }).join('');
+    html+='<div class="sec-title">Transaction log</div><div class="panel" style="padding:4px 8px"><table><thead><tr>'+
+      '<th class="l">Wk</th><th class="l">Date</th><th class="l">Team</th><th class="l">Type</th><th class="l">Added</th><th class="l">Dropped</th>'+(M.hasFaab?'<th>Bid</th>':'')+
+      '</tr></thead><tbody>'+(logRows||'<tr><td class="l muted" colspan="7">No moves yet.</td></tr>')+'</tbody></table></div>'+
+      '<p class="note">Newest first, up to 60 rows. Days on roster count from when the player joined that team: the Sleeper draft for drafted players and keepers, the processing date for pickups and trades. Keepers\' earlier seasons are not counted, because the league\'s Sleeper history starts this year.'+
+      (M.untracked?' '+M.untracked+' rostered player'+(M.untracked===1?'':'s')+' could not be traced to a draft pick or move and are counted from draft day.':'')+'</p>';
+    out.innerHTML=html;
+    $("movesRefresh").addEventListener("click",()=>ensureMoves(true));
+    $("movesSel").addEventListener("change",e=>{ movesSel=e.target.value; renderMoves(); });
+  }
+  async function ensureMoves(force){
+    const out=$("movesOut");
+    if(!STATE){ out.innerHTML='<div class="warn-box">Load the league first: hit Refresh from Sleeper on the Projections tab.</div>'; return; }
+    if(MOVES_CALC && !force){ renderMoves(); return; }
+    out.innerHTML='<div class="note">Loading transactions and draft…</div>';
+    const id=$("leagueId").value.trim();
+    let data=null, fromCache=false;
+    try{ data=await fetchMovesData(id); try{ localStorage.setItem(LS+".moves", JSON.stringify(data)); }catch(e){} }
+    catch(e){ console.warn(e); try{ data=JSON.parse(localStorage.getItem(LS+".moves")); fromCache=!!data; }catch(_){ data=null; } }
+    if(!data){ out.innerHTML='<div class="warn-box">Could not load transactions from Sleeper, and nothing is cached yet. Check the connection and try again.</div>'; return; }
+    if(!NAMES) out.innerHTML='<div class="note">Loading player names (one download a day, then cached on this device)…</div>';
+    await loadNames();
+    MOVES_CALC=computeMoves(STATE, data, Date.now()); MOVES_CALC.fromCache=fromCache; MOVES_CALC.t=data.t||Date.now();
+    renderMoves();
   }
   function doSim(){
     if(!STATE){ return; }
@@ -674,8 +1039,10 @@
           const res=runSim(STATE, cfg, sd);
           out+=renderModelNote(STATE, sd, sdAuto);
           out+=renderHeadline(res, STATE);
+          out+=renderMatchups(STATE, sd);
           out+=renderLadder(STATE);
           out+=renderProjected(res, STATE);
+          out+=renderSchedule(STATE);
           out+=renderBracket(res, STATE, sd);
         }
         $("output").innerHTML=out;
@@ -691,6 +1058,7 @@
   function ingest(bundle, fromCache){
     STATE=buildState(bundle);
     SCORING_RENDERED=false;
+    MOVES_CALC=null;
     const cfg=loadCfg();
     renderProjInputs(STATE, cfg);
     $("metaPill").textContent=STATE.leagueName+" · "+STATE.season+" · wk "+(STATE.played+ (STATE.remainingWeeks.length?"+":""))+" · "+STATE.teams.length+" teams";
@@ -735,6 +1103,7 @@
     const pane=$("pane-"+p); if(pane) pane.style.display="block";
     if(p==="admin") $("tab-admin").classList.remove("alert");
     if(p==="scoring") ensureScoring();
+    if(p==="moves") ensureMoves(false);
   }
   document.querySelectorAll(".tab").forEach(b=>b.addEventListener("click", ()=>showTab(b.dataset.pane)));
 
