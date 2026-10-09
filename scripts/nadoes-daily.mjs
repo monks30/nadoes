@@ -129,4 +129,38 @@ async function main() {
     const wk = (h.weekly[week] = {});
     for (const r of rosters) {
       const rid = Number(r.roster_id);
-      if (!Number.isInteger(rid) ||
+      if (!Number.isInteger(rid) || rid < 1 || rid > 64) continue;
+      const c = { IR: 0, Out: 0, Doubtful: 0, Questionable: 0, hurt: [] };
+      for (const pid of (Array.isArray(r.players) ? r.players : [])) { if (!okId(pid)) continue; const { s } = status(pid); if (s) c[s]++; }
+      const row = (Array.isArray(matchups) ? matchups : []).find(m => Number(m.roster_id) === rid);
+      for (const pid of (row && Array.isArray(row.starters) ? row.starters : [])) {
+        if (!okId(pid)) continue;
+        const { s } = status(pid);
+        if (s === "IR" || s === "Out" || s === "Doubtful") { c.hurt.push(pid); remember(pid); }
+      }
+      wk[rid] = c;
+    }
+  }
+
+  // 3. Freeze the status of players in each new completed move.
+  let frozen = 0;
+  for (const round of txRounds) for (const x of (round || [])) {
+    if (x.status !== "complete") continue;
+    const t = Number(x.status_updated || x.created || 0);
+    const adds = (x.adds && typeof x.adds === "object") ? x.adds : {}, drops = (x.drops && typeof x.drops === "object") ? x.drops : {};
+    const tid = String(x.transaction_id || "");
+    if (!okId(tid) || own(h.moves, tid) || NOW - t > SNAP_DAYS * DAY) continue;
+    const st = {};
+    for (const pid of [...Object.keys(adds), ...Object.keys(drops)]) { if (!okId(pid)) continue; st[pid] = status(pid).s; remember(pid); }
+    h.moves[tid] = { at: NOW, st };
+    frozen++;
+  }
+
+  h.lastRun = NOW;
+  mkdirSync(FILE.split("/").slice(0, -1).join("/") || ".", { recursive: true });
+  writeFileSync(FILE, JSON.stringify(h));
+  const injured = Object.keys(h.current).length;
+  console.log(`Week ${week}: ${injured} rostered players injured, ${h.log.length} changes logged, ${frozen} new moves frozen.`);
+}
+
+main().catch(e => { console.error(e); process.exit(1); });
