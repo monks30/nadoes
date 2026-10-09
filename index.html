@@ -54,7 +54,8 @@
   .nst .muted{ color:var(--dim); }
   .nst code{ background:var(--panel2); padding:1px 5px; border-radius:4px; font-size:12px; }
   /* tabs */
-  .nst .tabs{ display:flex; gap:2px; border-bottom:1px solid var(--line); margin-bottom:18px; }
+  .nst .tabs{ display:flex; gap:2px; border-bottom:1px solid var(--line); margin-bottom:18px; overflow-x:auto; }
+  .nst .tab{ flex:0 0 auto; white-space:nowrap; }
   .nst .tab{ background:transparent; color:var(--dim); border:0; border-bottom:2px solid transparent;
              border-radius:0; padding:9px 16px; font-size:13px; font-weight:600; cursor:pointer; }
   .nst .tab:hover{ color:var(--ink); }
@@ -123,6 +124,8 @@
     .nst .card.champ{ min-width:100%; }
     .nst .card .big{ font-size:16px; }
   }
+  .nst .tag.q{ color:var(--warn); border-color:var(--warn); }
+  .nst .tag.out{ color:var(--bad); border-color:var(--bad); }
 </style>
 </head>
 <body class="nst">
@@ -134,6 +137,7 @@
     <button class="tab active" id="tab-main" data-pane="main">Projections</button>
     <button class="tab" id="tab-scoring" data-pane="scoring">Scoring</button>
     <button class="tab" id="tab-moves" data-pane="moves">Moves</button>
+    <button class="tab" id="tab-injuries" data-pane="injuries">Injuries</button>
     <button class="tab" id="tab-admin" data-pane="admin">Admin</button>
   </div>
 
@@ -150,6 +154,10 @@
 
   <div class="tabpane" id="pane-scoring" style="display:none">
     <div id="scoringOut"><div class="note">Open this tab after a refresh to load position scoring.</div></div>
+  </div>
+
+  <div class="tabpane" id="pane-injuries" style="display:none">
+    <div id="injOut"><div class="note">Open this tab after a refresh to load injuries.</div></div>
   </div>
 
   <div class="tabpane" id="pane-moves" style="display:none">
@@ -282,7 +290,7 @@
       const pa = (st.fpts_against||0) + (st.fpts_against_decimal||0)/100;
       return { rid:r.roster_id, name, wins:st.wins||0, losses:st.losses||0, ties:st.ties||0,
                pf, pa, division:(st.division||null), players:(r.players||[]),
-               faabUsed:(st.waiver_budget_used!=null?Number(st.waiver_budget_used):null) };
+               faabUsed:(st.waiver_budget_used!=null?Number(st.waiver_budget_used):null), reserve:(r.reserve||[]) };
     });
     const byRid = {}; teams.forEach(t=>byRid[t.rid]=t);
 
@@ -846,7 +854,7 @@
   }
   // ---------- moves / transactions / roster tenure ----------
   const DAY=86400000;
-  let MOVES_CALC=null, NAMES=null, movesSel=null;
+  let MOVES_CALC=null, NAMES=null, NAMES_T=null, movesSel=null;
   async function fetchMovesData(id){
     const rounds=[]; for(let w=1;w<=18;w++) rounds.push(w);
     let errs=0;
@@ -864,18 +872,18 @@
   }
   async function loadNames(){
     if(NAMES) return NAMES;
-    let cached=null; try{ cached=JSON.parse(localStorage.getItem(LS+".names")); }catch(e){}
-    if(cached && cached.map && (Date.now()-cached.t)<DAY){ NAMES=cached.map; return NAMES; }
+    let cached=null; try{ cached=JSON.parse(localStorage.getItem(LS+".names2")); }catch(e){}
+    if(cached && cached.map && (Date.now()-cached.t)<DAY){ NAMES=cached.map; NAMES_T=cached.t; return NAMES; }
     try{
       const res=await fetch(BASE+"/players/nfl"); if(!res.ok) throw new Error("HTTP "+res.status);
       const all=await res.json(); const map={};
       for(const id in all){ const p=all[id]; if(!p) continue;
         const n=p.full_name||((p.first_name||"")+" "+(p.last_name||"")).trim(); if(!n) continue;
-        map[id]=[n, p.position||""]; }
-      NAMES=map;
-      try{ localStorage.setItem(LS+".names", JSON.stringify({t:Date.now(), map})); }catch(e){}
+        map[id]=[n, p.position||"", p.injury_status||"", p.injury_body_part||""]; }
+      NAMES=map; NAMES_T=Date.now();
+      try{ localStorage.setItem(LS+".names2", JSON.stringify({t:Date.now(), map})); }catch(e){}
       return NAMES;
-    }catch(e){ console.warn("names fetch failed", e); if(cached && cached.map){ NAMES=cached.map; return NAMES; } return null; }
+    }catch(e){ console.warn("names fetch failed", e); if(cached && cached.map){ NAMES=cached.map; NAMES_T=cached.t; return NAMES; } return null; }
   }
   function playerInfo(pid, meta){
     if(NAMES && NAMES[pid]) return {n:NAMES[pid][0], p:NAMES[pid][1]};
@@ -883,12 +891,43 @@
     if(/^[A-Z]{2,3}$/.test(String(pid))) return {n:pid+" DEF", p:"DEF"};
     return {n:"Player "+pid, p:""};
   }
+  let HISTORY=null, HIST_SRC="";
+  async function loadHistory(){
+    try{
+      const res=await fetch("data/nadoes-history.json?v="+Date.now(), {cache:"no-store"});
+      if(!res.ok) throw new Error("HTTP "+res.status);
+      HISTORY=await res.json(); HIST_SRC="live";
+      try{ localStorage.setItem(LS+".hist", JSON.stringify(HISTORY)); }catch(e){}
+    }catch(e){
+      try{ HISTORY=JSON.parse(localStorage.getItem(LS+".hist")); }catch(_){ HISTORY=null; }
+      HIST_SRC=HISTORY?"cached":"";
+    }
+    return HISTORY;
+  }
+  function injOf(pid){
+    const x=NAMES && NAMES[pid]; const s=x?String(x[2]||""):"";
+    if(/^(IR|PUP|NFI)/i.test(s)) return {k:"IR", label:"IR", part:x[3]||""};
+    if(/^out/i.test(s)) return {k:"Out", label:"Out", part:x[3]||""};
+    if(/^doubt/i.test(s)) return {k:"Doubtful", label:"D", part:x[3]||""};
+    if(/^quest/i.test(s)) return {k:"Questionable", label:"Q", part:x[3]||""};
+    return null;
+  }
+  function injTag(pid){
+    const j=injOf(pid); if(!j) return '';
+    const cls=(j.k==="IR"||j.k==="Out")?' out':' q';
+    return ' <span class="tag'+cls+'" title="'+j.k+(j.part?(' · '+j.part):'')+'">'+j.label+'</span>';
+  }
   function computeMoves(state, data, now){
-    const c={}; state.teams.forEach(t=>c[t.rid]={waiver:0,fa:0,trade:0,drops:0,failed:0,faab:0,moves:0,stints:[]});
+    const c={}; state.teams.forEach(t=>c[t.rid]={waiver:0,fa:0,trade:0,drops:0,failed:0,faab:0,moves:0,stints:[],addedP:[],droppedP:[]});
     const meta={};
     (data.picks||[]).forEach(p=>{ const m=p.metadata||{}; const n=((m.first_name||"")+" "+(m.last_name||"")).trim();
       if(p.player_id && n) meta[p.player_id]={n, p:m.position||""}; });
     const draftT=(data.draft && (data.draft.start_time||data.draft.last_picked)) || null;
+    const SNAP_DAYS=3;
+    let snapStore=null; try{ snapStore=JSON.parse(localStorage.getItem(LS+".injSnap")); }catch(e){}
+    if(!snapStore || !snapStore.snaps) snapStore={since:now, snaps:{}};
+    const snaps=snapStore.snaps; let snapChanged=false;
+    const statusT=NAMES_T||now;
     const seen={};
     const txns=(data.txns||[]).filter(x=>{ const k=x.transaction_id||JSON.stringify([x.created,x.adds,x.drops]);
       if(seen[k]) return false; seen[k]=1; return true; });
@@ -909,14 +948,23 @@
       else if(type==="trade"){ (x.roster_ids||[]).forEach(r=>{ if(c[r]){ c[r].trade++; c[r].moves++; } }); }
       else { (x.roster_ids||[]).forEach(r=>{ if(c[r]) c[r].moves++; }); }
       const drops=x.drops||{}, adds=x.adds||{};
+      const tid=x.transaction_id||(String(t)+JSON.stringify(adds)+JSON.stringify(drops));
+      const repoSnap=(HISTORY && HISTORY.moves && HISTORY.moves[tid]) || null;
+      if(!repoSnap && !snaps[tid] && NAMES && Math.abs(statusT-t)<=SNAP_DAYS*DAY){
+        const st={}; Object.keys(adds).concat(Object.keys(drops)).forEach(pid=>{ const j=injOf(pid); st[pid]=j?j.k:""; });
+        snaps[tid]={at:statusT, st}; snapChanged=true;
+      }
+      const snap=repoSnap||snaps[tid]||null;
       Object.keys(drops).forEach(pid=>{ const r=drops[pid];
-        if(type!=="trade" && c[r]) c[r].drops++;
+        if(type!=="trade" && c[r]){ c[r].drops++; c[r].droppedP.push({pid,snap}); }
         const o=open[pid]; if(o && o.rid===r){ if(c[r]) c[r].stints.push({pid, start:o.start, end:t, via:o.via}); delete open[pid]; } });
       Object.keys(adds).forEach(pid=>{ const r=adds[pid], o=open[pid];
         if(o && o.rid!==r && c[o.rid]) c[o.rid].stints.push({pid, start:o.start, end:t, via:o.via});
+        if(type!=="trade" && c[r]) c[r].addedP.push({pid,snap});
         if(c[r]) open[pid]={rid:r, start:t, via:label[type]||type}; else delete open[pid]; });
-      log.push({t, leg:x.__leg, type, label:label[type]||type, rids:x.roster_ids||[], adds, drops, bid});
+      log.push({t, leg:x.__leg, type, label:label[type]||type, rids:x.roster_ids||[], adds, drops, bid, snap});
     });
+    if(snapChanged){ try{ localStorage.setItem(LS+".injSnap", JSON.stringify(snapStore)); }catch(e){} }
     const teams=state.teams.map(t=>{
       const cc=c[t.rid];
       const roster=(t.players||[]).map(pid=>{
@@ -929,7 +977,15 @@
         return {pid:st.pid, name:info.n, days:Math.max(0,(st.end-st.start)/DAY), via:st.via}; });
       const avg=a=>a.length?a.reduce((x,p)=>x+p.days,0)/a.length:null;
       const faab=(t.faabUsed!=null)?t.faabUsed:cc.faab;
-      return Object.assign({rid:t.rid, name:t.name}, cc, {faab, roster, gone, avgLife:avg(roster), goneAvg:avg(gone)});
+      const inj={IR:0,Out:0,Doubtful:0,Questionable:0};
+      (t.players||[]).forEach(pid=>{ const j=injOf(pid); if(j) inj[j.k]++; });
+      const nextRow=((state.matchups[state.remainingWeeks[0]])||[]).find(x=>x.roster_id===t.rid);
+      const hurtStarters=nextRow?(nextRow.starters||[]).filter(pid=>{ const j=injOf(pid); return j && j.k!=="Questionable"; }):[];
+      const isOut=e=>{ if(e.snap){ const k=e.snap.st[e.pid]; return k==="IR"||k==="Out"; }
+        const j=injOf(e.pid); return !!(j && (j.k==="IR"||j.k==="Out")); };
+      const injury={slots:(t.reserve||[]).length, inj, hurtStarters,
+        injAdds:cc.addedP.filter(isOut), injDrops:cc.droppedP.filter(isOut)};
+      return Object.assign({rid:t.rid, name:t.name}, cc, {faab, roster, gone, avgLife:avg(roster), goneAvg:avg(gone), injury});
     });
     const allRoster=[]; teams.forEach(T=>T.roster.forEach(p=>allRoster.push(Object.assign({team:T.name},p))));
     const allGone=[]; teams.forEach(T=>T.gone.forEach(p=>allGone.push(Object.assign({team:T.name},p))));
@@ -937,8 +993,107 @@
     const longest=allRoster.slice().sort((a,b)=>b.days-a.days)[0]||null;
     const quickest=allGone.slice().sort((a,b)=>a.days-b.days)[0]||null;
     const hasFaab=(state.waiverType===2)||teams.some(T=>T.faab>0);
-    return {teams, log:log.reverse(), meta, total:log.length, leagueAvg, longest, quickest, hasFaab, draftOk:!!draftT,
+    const irSlots=(state.rosterPositions||[]).filter(x=>x==="IR").length;
+    return {irSlots, nextWeek:state.remainingWeeks[0]||null, teams, log:log.reverse(), meta, total:log.length, leagueAvg, longest, quickest, hasFaab, draftOk:!!draftT,
             untracked:allRoster.filter(p=>p.via==="Untracked").length};
+  }
+  function renderInjuries(){
+    const M=MOVES_CALC, out=$("injOut"), H=HISTORY;
+    const nameOf={}; STATE.teams.forEach(t=>nameOf[t.rid]=t.name);
+    const pname=pid=>{ if(NAMES && NAMES[pid]) return NAMES[pid][0]; if(H && H.names && H.names[pid]) return H.names[pid][0]; return playerInfo(pid, M.meta).n; };
+    const fdt=t=>new Date(t).toLocaleString("en-AU",{day:"numeric",month:"short",hour:"numeric",minute:"2-digit"});
+    const fd=t=>new Date(t).toLocaleDateString("en-AU",{day:"numeric",month:"short"});
+    let html='<div class="bar"><button id="injRefresh" class="sec">Refresh</button><span class="pill">'+
+      (H?('history updated '+fdt(H.lastRun)+(HIST_SRC==="cached"?' (cached)':'')):'no history file yet')+'</span></div>';
+    if(!H) html+='<div class="warn-box">The daily history file was not found, so this shows today\'s picture only. Injury days, weekly counts and the change log appear once the GitHub job has run. The file only loads from the GitHub link, not from a copy opened on your computer.</div>';
+    if(!NAMES) html+='<div class="warn-box">Player file did not load, so current injury statuses are missing. Refresh to retry.</div>';
+    if(NAMES){
+      const sum=k=>M.teams.reduce((a,T)=>a+(k==="slots"?T.injury.slots:T.injury.inj[k]),0);
+      const totAdds=M.teams.reduce((a,T)=>a+T.injury.injAdds.length,0), totDrops=M.teams.reduce((a,T)=>a+T.injury.injDrops.length,0);
+      const recAdds=M.teams.reduce((a,T)=>a+T.injury.injAdds.filter(e=>e.snap).length,0), recDrops=M.teams.reduce((a,T)=>a+T.injury.injDrops.filter(e=>e.snap).length,0);
+      const split=(tot,rec)=>rec+' recorded at the move, '+(tot-rec)+' from today\'s status';
+      const ir=M.teams.slice().sort((a,b)=>(b.injury.inj.IR+b.injury.inj.Out)-(a.injury.inj.IR+a.injury.inj.Out) || a.name.localeCompare(b.name)).map(T=>{
+        const I=T.injury, cls=mineMatch(T.name)?' class="mine"':'';
+        const hs=I.hurtStarters.length?('<span style="color:var(--bad);font-weight:700">'+I.hurtStarters.length+'</span>'):'0';
+        return '<tr'+cls+'><td class="l">'+T.name+'</td><td class="num">'+I.slots+(M.irSlots?('/'+M.irSlots):'')+'</td>'+
+          '<td class="num">'+I.inj.IR+'</td><td class="num">'+I.inj.Out+'</td><td class="num">'+I.inj.Doubtful+'</td><td class="num">'+I.inj.Questionable+'</td>'+
+          '<td class="num">'+hs+'</td><td class="num">'+I.injAdds.length+'</td><td class="num">'+I.injDrops.length+'</td></tr>';
+      }).join('');
+      const asOf=NAMES_T?new Date(NAMES_T).toLocaleString("en-AU",{day:"numeric",month:"short",hour:"numeric",minute:"2-digit"}):'';
+      html+='<div class="sec-title">Injury report</div>'+
+        '<div class="cards">'+
+        '<div class="card"><div class="lab">In fantasy IR slots</div><div class="big">'+sum("slots")+'</div><div class="sub2">across the league'+(M.irSlots?(' ('+M.irSlots+' slot'+(M.irSlots===1?'':'s')+' per team)'):'')+'</div></div>'+
+        '<div class="card"><div class="lab">Rostered and out</div><div class="big">'+(sum("IR")+sum("Out"))+'</div><div class="sub2">'+sum("IR")+' on NFL IR, '+sum("Out")+' ruled out</div></div>'+
+        '<div class="card"><div class="lab">Injured pickups</div><div class="big">'+totAdds+'</div><div class="sub2">IR or out: '+split(totAdds,recAdds)+'</div></div>'+
+        '<div class="card"><div class="lab">Injured drops</div><div class="big">'+totDrops+'</div><div class="sub2">IR or out: '+split(totDrops,recDrops)+'</div></div>'+
+        '</div>'+
+        '<div class="panel" style="padding:4px 8px"><table><thead><tr><th class="l">Team</th><th>IR slots</th><th>NFL IR</th><th>Out</th><th>Doubt</th><th>Quest</th>'+
+        '<th>Hurt starters'+(M.nextWeek?(' wk'+M.nextWeek):'')+'</th><th>Inj adds</th><th>Inj drops</th></tr></thead><tbody>'+ir+'</tbody></table></div>'+
+        '<p class="note">IR slots = players parked in the fantasy IR spots. NFL IR, Out, Doubtful and Questionable = official injury status of everyone on the roster, bench and IR slots included (NFL IR also covers PUP and NFI lists). Hurt starters = players set in this week\'s starting lineup who are IR, out or doubtful, so check these before kickoff. Inj adds and drops count players who were IR or out when the move was made. Sleeper keeps no injury history, so the daily GitHub job freezes each player\'s status within a day of the move; this browser does the same as a backup if the tab is opened within 3 days. Older moves fall back to today\'s status. Moves in and out of IR slots are not logged by Sleeper, so they cannot be counted.'+
+        (asOf?(' Injury status as of '+asOf+'; it refreshes once a day.'):'')+'</p>';
+    }
+
+    // season to date: dead starts (no history needed) + history columns
+    const skip={BN:1,IR:1,TAXI:1}; const slotCodes=(STATE.rosterPositions||[]).filter(c=>!skip[c]);
+    const dead={}; STATE.teams.forEach(t=>dead[t.rid]=0);
+    STATE.completedWeeks.forEach(w=>{ (STATE.matchups[w]||[]).forEach(row=>{ const sp=row.starters_points||[];
+      (row.starters||[]).forEach((pid,i)=>{ const c=slotCodes[i]; if(!c||c==="K"||c==="DEF"||c==="DST") return;
+        if(!pid||pid==="0"||Number(sp[i])===0) dead[row.roster_id]=(dead[row.roster_id]||0)+1; }); }); });
+    const weeks=H?Object.keys(H.weekly||{}).map(Number).sort((x,y)=>x-y):[];
+    const hurtStarts=rid=>weeks.reduce((a,w)=>a+(((H.weekly[w]||{})[rid]||{}).hurt||[]).length,0);
+    const dd=rid=>(H && H.days && H.days[rid])||{IR:0,Out:0,Doubtful:0,Questionable:0};
+    const lost=rid=>{ const d=dd(rid); return (d.IR||0)+(d.Out||0); };
+    if(H){
+      const totLost=STATE.teams.reduce((a,t)=>a+lost(t.rid),0);
+      let top=null; Object.keys(H.playerOut||{}).forEach(pid=>{ const x=H.playerOut[pid]; if(!top||x.d>top.d) top={pid,d:x.d,rid:x.rid}; });
+      html+='<div class="sec-title">Injury load since '+fd(H.since)+'</div><div class="cards">'+
+        '<div class="card"><div class="lab">Player-days lost</div><div class="big">'+totLost+'</div><div class="sub2">rostered players on NFL IR or out, over '+H.trackedDays+' tracked day'+(H.trackedDays===1?'':'s')+'</div></div>'+
+        '<div class="card"><div class="lab">Status changes</div><div class="big">'+(H.log||[]).length+'</div><div class="sub2">new injuries, upgrades and recoveries logged</div></div>'+
+        '<div class="card"><div class="lab">Most days out</div><div class="big" style="font-size:15px">'+(top?pname(top.pid):'—')+'</div><div class="sub2">'+(top?((nameOf[top.rid]||'')+' · '+top.d+' days'):'nobody yet')+'</div></div>'+
+        '</div>';
+    } else {
+      html+='<div class="sec-title">Season to date</div>';
+    }
+    const order=STATE.teams.slice().sort((a,b)=>H?(lost(b.rid)-lost(a.rid) || dead[b.rid]-dead[a.rid]):(dead[b.rid]-dead[a.rid]));
+    const trow=order.map(t=>{ const d=dd(t.rid), cls=mineMatch(t.name)?' class="mine"':'';
+      return '<tr'+cls+'><td class="l">'+t.name+'</td>'+
+        (H?('<td class="num"><b>'+lost(t.rid)+'</b></td><td class="num">'+(d.Doubtful||0)+'</td><td class="num">'+(d.Questionable||0)+'</td>'+
+            '<td class="num">'+fmt(H.trackedDays?lost(t.rid)/H.trackedDays:null,1)+'</td><td class="num">'+hurtStarts(t.rid)+'</td>'):'')+
+        '<td class="num">'+dead[t.rid]+'</td></tr>'; }).join('');
+    html+='<div class="panel" style="padding:4px 8px"><table><thead><tr><th class="l">Team</th>'+
+      (H?'<th>Days lost</th><th>Doubt days</th><th>Quest days</th><th>Out per day</th><th>Hurt starts</th>':'')+
+      '<th>Dead starts</th></tr></thead><tbody>'+trow+'</tbody></table></div>'+
+      '<p class="note">'+(H?'Days lost = player-days on NFL IR or out across the whole roster (bench and IR slots included). Doubt and Quest days count the same way for doubtful and questionable. Out per day = how many of the team\'s players are out on a typical day. Hurt starts = lineup spots filled by an IR, out or doubtful player in the weekly check before Sunday\'s games. ':'')+
+      'Dead starts = starting spots (not K or DEF) that scored zero or were left empty in completed weeks, from injury, bye or a dud game. It comes from Sleeper\'s scores, so it covers the whole season.</p>';
+
+    if(H && weeks.length){
+      const wrow=order.map(t=>{ const cls=mineMatch(t.name)?' class="mine"':'';
+        return '<tr'+cls+'><td class="l">'+t.name+'</td>'+weeks.map(w=>{ const c=((H.weekly[w]||{})[t.rid])||{};
+          const n=(c.IR||0)+(c.Out||0), hs=(c.hurt||[]).length;
+          return '<td class="num">'+n+(hs?' <span style="color:var(--bad);font-weight:700" title="'+(c.hurt||[]).map(pname).join(', ')+'">·'+hs+'</span>':'')+'</td>'; }).join('')+'</tr>'; }).join('');
+      html+='<div class="sec-title">Injured players by week</div><div class="panel" style="padding:4px 8px"><table><thead><tr><th class="l">Team</th>'+
+        weeks.map(w=>'<th>Wk '+w+'</th>').join('')+'</tr></thead><tbody>'+wrow+'</tbody></table></div>'+
+        '<p class="note">Rostered players on NFL IR or out at the weekly check. The red figure after the dot = injured players left in the starting lineup.</p>';
+    }
+
+    if(H){
+      const sel=window.__injSel||"all";
+      const opts='<option value="all"'+(sel==="all"?' selected':'')+'>All teams</option>'+
+        STATE.teams.slice().sort((a,b)=>a.name.localeCompare(b.name)).map(t=>'<option value="'+t.rid+'"'+(String(t.rid)===sel?' selected':'')+'>'+t.name+'</option>').join('');
+      const lab=x=>x?x:'Healthy';
+      const lrows=(H.log||[]).slice().reverse().filter(l=>sel==="all"||String(l[2])===sel).slice(0,60).map(l=>{
+        const worse=(l[4]==="IR"||l[4]==="Out"), better=(l[4]==="");
+        return '<tr><td class="l num">'+fd(l[0])+'</td><td class="l">'+pname(l[1])+'</td><td class="l">'+(nameOf[l[2]]||l[2])+'</td>'+
+          '<td class="l">'+lab(l[3])+' to <span style="color:'+(worse?'var(--bad)':(better?'var(--good)':'var(--warn)'))+';font-weight:600">'+lab(l[4])+'</span></td>'+
+          '<td class="l muted">'+(l[5]||'')+'</td></tr>'; }).join('');
+      html+='<div class="sec-title">Injury change log</div><div style="margin:4px 0 10px"><select id="injSel">'+opts+'</select></div>'+
+        '<div class="panel" style="padding:4px 8px"><table><thead><tr><th class="l">Date</th><th class="l">Player</th><th class="l">Team</th><th class="l">Change</th><th class="l">Injury</th></tr></thead><tbody>'+
+        (lrows||'<tr><td class="l muted" colspan="5">No changes logged yet. The first run records today\'s statuses; changes show from the second run on.</td></tr>')+'</tbody></table></div>'+
+        '<p class="note">Newest first, up to 60. Covers every player on a fantasy roster. Players picked up already injured start being tracked from that day; that is not logged as a change.</p>';
+    }
+    out.innerHTML=html;
+    $("injRefresh").addEventListener("click",()=>ensureInjuries(true));
+    const se=$("injSel"); if(se) se.addEventListener("change",e=>{ window.__injSel=e.target.value; renderInjuries(); });
   }
   function renderMoves(){
     const M=MOVES_CALC, out=$("movesOut");
@@ -972,7 +1127,7 @@
     if(movesSel!=="all"){
       const T=M.teams.find(x=>String(x.rid)===movesSel);
       if(T){
-        const r=T.roster.map(p=>'<tr><td class="l">'+p.name+'</td><td class="l muted">'+(p.pos||'')+'</td><td class="l"><span class="tag">'+p.via+'</span></td><td class="num">'+dd(p.days)+'</td></tr>').join('');
+        const r=T.roster.map(p=>'<tr><td class="l">'+p.name+injTag(p.pid)+((T.injury.hurtStarters.indexOf(p.pid)>=0)?' <span class="tag out">starting</span>':'')+'</td><td class="l muted">'+(p.pos||'')+'</td><td class="l"><span class="tag">'+p.via+'</span></td><td class="num">'+dd(p.days)+'</td></tr>').join('');
         html+='<div class="panel" style="padding:4px 8px"><table><thead><tr><th class="l">Player</th><th class="l">Pos</th><th class="l">How</th><th>Days</th></tr></thead><tbody>'+r+'</tbody></table></div>'+
           '<p class="note">'+T.name+': average roster life '+dd(T.avgLife)+' days; '+T.gone.length+' player'+(T.gone.length===1?'':'s')+' moved on, lasting '+dd(T.goneAvg)+' days on average.</p>';
       }
@@ -985,8 +1140,10 @@
         added=Object.keys(e.adds).map(pid=>pn(pid)+' to '+(nameOf[e.adds[pid]]||e.adds[pid])).join(', ');
       } else {
         team=nameOf[e.rids[0]]||e.rids[0];
-        added=Object.keys(e.adds).map(pn).join(', ');
-        dropped=Object.keys(e.drops).map(pn).join(', ');
+        const st=pid=>{ if(!e.snap) return ''; const k=e.snap.st[pid]; if(!k) return '';
+          const lab=k==="Doubtful"?"D":(k==="Questionable"?"Q":k); return ' <span class="tag'+((k==="IR"||k==="Out")?' out':' q')+'" title="status when the move was made">'+lab+'</span>'; };
+        added=Object.keys(e.adds).map(pid=>pn(pid)+st(pid)).join(', ');
+        dropped=Object.keys(e.drops).map(pid=>pn(pid)+st(pid)).join(', ');
       }
       return '<tr><td class="num l">'+e.leg+'</td><td class="l num">'+date+'</td><td class="l">'+team+'</td><td class="l"><span class="tag">'+e.label+'</span></td>'+
         '<td class="l">'+(added||'—')+'</td><td class="l muted">'+(dropped||'—')+'</td>'+(M.hasFaab?'<td class="num">'+(e.type==="waiver"?'$'+e.bid:'')+'</td>':'')+'</tr>';
@@ -1000,21 +1157,23 @@
     $("movesRefresh").addEventListener("click",()=>ensureMoves(true));
     $("movesSel").addEventListener("change",e=>{ movesSel=e.target.value; renderMoves(); });
   }
-  async function ensureMoves(force){
-    const out=$("movesOut");
-    if(!STATE){ out.innerHTML='<div class="warn-box">Load the league first: hit Refresh from Sleeper on the Projections tab.</div>'; return; }
-    if(MOVES_CALC && !force){ renderMoves(); return; }
+  async function prepMoves(out, force){
+    if(!STATE){ out.innerHTML='<div class="warn-box">Load the league first: hit Refresh from Sleeper on the Projections tab.</div>'; return false; }
+    if(MOVES_CALC && !force) return true;
     out.innerHTML='<div class="note">Loading transactions and draft…</div>';
     const id=$("leagueId").value.trim();
     let data=null, fromCache=false;
     try{ data=await fetchMovesData(id); try{ localStorage.setItem(LS+".moves", JSON.stringify(data)); }catch(e){} }
     catch(e){ console.warn(e); try{ data=JSON.parse(localStorage.getItem(LS+".moves")); fromCache=!!data; }catch(_){ data=null; } }
-    if(!data){ out.innerHTML='<div class="warn-box">Could not load transactions from Sleeper, and nothing is cached yet. Check the connection and try again.</div>'; return; }
-    if(!NAMES) out.innerHTML='<div class="note">Loading player names (one download a day, then cached on this device)…</div>';
+    if(!data){ out.innerHTML='<div class="warn-box">Could not load transactions from Sleeper, and nothing is cached yet. Check the connection and try again.</div>'; return false; }
+    if(!NAMES) out.innerHTML='<div class="note">Loading player file (one download a day, then saved on this device)…</div>';
     await loadNames();
+    await loadHistory();
     MOVES_CALC=computeMoves(STATE, data, Date.now()); MOVES_CALC.fromCache=fromCache; MOVES_CALC.t=data.t||Date.now();
-    renderMoves();
+    return true;
   }
+  async function ensureMoves(force){ if(await prepMoves($("movesOut"), force)) renderMoves(); }
+  async function ensureInjuries(force){ if(await prepMoves($("injOut"), force)) renderInjuries(); }
   function doSim(){
     if(!STATE){ return; }
     saveCfg();
@@ -1104,6 +1263,7 @@
     if(p==="admin") $("tab-admin").classList.remove("alert");
     if(p==="scoring") ensureScoring();
     if(p==="moves") ensureMoves(false);
+    if(p==="injuries") ensureInjuries(false);
   }
   document.querySelectorAll(".tab").forEach(b=>b.addEventListener("click", ()=>showTab(b.dataset.pane)));
 
