@@ -29,7 +29,7 @@ jobs:
         with:
           node-version: 24             # current LTS; Node 20 stopped getting security fixes in April 2026
       - name: Record injuries and moves
-        run: node scripts/scripts/nadoes-daily.mjs
+        run: node scripts/nadoes-daily.mjs
       - name: Save the data file
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
