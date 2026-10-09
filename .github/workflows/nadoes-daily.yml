@@ -1,0 +1,45 @@
+name: Nadoes daily tracker
+
+on:
+  schedule:
+    # 16:00 UTC daily = 3am Canberra (AEDT), noon US Eastern:
+    # after Friday injury reports and before Sunday's early games.
+    - cron: "0 16 * * *"
+  workflow_dispatch: {}   # "Run workflow" button; only people with write access can use it
+
+# Nothing by default; the one job below asks only for what it needs.
+permissions: {}
+
+concurrency:
+  group: nadoes-daily
+  cancel-in-progress: false
+
+jobs:
+  track:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write          # to commit data/nadoes-history.json, nothing else
+    steps:
+      # Actions are pinned to exact commits, not tags, so a hijacked tag can't swap in new code.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1   # v7.0.1
+        with:
+          persist-credentials: false   # the token is not left on disk while Sleeper data is processed
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24             # current LTS; Node 20 stopped getting security fixes in April 2026
+      - name: Record injuries and moves
+        run: node scripts/nadoes-daily.mjs
+      - name: Save the data file
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/nadoes-history.json 2>/dev/null || exit 0
+          if git diff --cached --quiet; then echo "No changes"; exit 0; fi
+          git commit -m "Daily injury and moves update"
+          # The token is used only for this pull and push, passed as a header, never written to a file.
+          AUTH="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
+          git -c http.extraheader="$AUTH" pull --rebase origin "$GITHUB_REF_NAME"
+          git -c http.extraheader="$AUTH" push origin "HEAD:$GITHUB_REF_NAME"
