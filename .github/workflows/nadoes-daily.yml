@@ -19,27 +19,35 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
-      contents: write          # to commit data/nadoes-history.json, nothing else
+      contents: write          # to commit the files in data/, nothing else
     steps:
       # Actions are pinned to exact commits, not tags, so a hijacked tag can't swap in new code.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1   # v7.0.1
         with:
+          ref: main                    # always the newest copy, even when re-running an old run
           persist-credentials: false   # the token is not left on disk while Sleeper data is processed
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 24             # current LTS; Node 20 stopped getting security fixes in April 2026
-      - name: Record injuries and moves
-        run: node scripts/nadoes-daily.mjs
-      - name: Save the data file
+      - name: Record injuries and moves, then save
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add data/*.json 2>/dev/null || exit 0
-          if git diff --cached --quiet; then echo "No changes"; exit 0; fi
-          git commit -m "Daily injury and moves update"
-          # The token is used only for this pull and push, passed as a header, never written to a file.
+          # The token is passed to git as a header for fetch and push only, never written to a file,
+          # and removed from the environment of the script that reads Sleeper's data.
           AUTH="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
-          git -c http.extraheader="$AUTH" pull --rebase origin "$GITHUB_REF_NAME"
-          git -c http.extraheader="$AUTH" push origin "HEAD:$GITHUB_REF_NAME"
+          for attempt in 1 2 3; do
+            # Start from the newest data on GitHub every time, so two runs can never clash.
+            git -c http.extraheader="$AUTH" fetch --quiet origin main
+            git reset --quiet --hard origin/main
+            env -u GH_TOKEN node scripts/nadoes-daily.mjs
+            git add data/*.json 2>/dev/null || true
+            if git diff --cached --quiet; then echo "No changes to save."; exit 0; fi
+            git commit --quiet -m "Daily injury and moves update"
+            if git -c http.extraheader="$AUTH" push --quiet origin HEAD:main; then echo "Saved."; exit 0; fi
+            echo "The repo changed while this run was working. Starting again from the newer copy (attempt $attempt of 3)."
+            sleep $((attempt * 5))
+          done
+          echo "Could not save after 3 attempts."; exit 1
