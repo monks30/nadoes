@@ -36,7 +36,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add data/nadoes-history.json 2>/dev/null || exit 0
+          git add data/*.json 2>/dev/null || exit 0
           if git diff --cached --quiet; then echo "No changes"; exit 0; fi
           git commit -m "Daily injury and moves update"
           # The token is used only for this pull and push, passed as a header, never written to a file.
