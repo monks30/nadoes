@@ -138,8 +138,9 @@ async function main() {
           trackedDays: 0, rostered: {}, current: {}, log: [], days: {}, playerOut: {}, weekly: {}, moves: {}, names: {} };
   }
 
-  // Days since the last run, so a missed or late run still counts correctly.
-  const elapsed = h.lastRun ? Math.min(7, Math.max(1, Math.round((NOW - h.lastRun) / DAY))) : 1;
+  // Whole days since the last counted run. A missed run still counts its days (up to 7);
+  // an extra run on the same day (a manual run, a re-run) counts 0, so no day is counted twice.
+  const elapsed = h.lastRun ? Math.min(7, Math.max(0, Math.round((NOW - h.lastRun) / DAY))) : 1;
   const own = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
   const status = pid => { const p = own(players, pid) ? players[pid] : null;
     const start = p ? Date.parse(p.injury_start_date || "") : NaN;
@@ -223,7 +224,8 @@ async function main() {
     frozen++;
   }
 
-  h.lastRun = NOW;
+  // Only move the clock on when a day was counted, so same-day extra runs don't eat into tomorrow's.
+  if (elapsed > 0) h.lastRun = NOW;
   mkdirSync(FILE.split("/").slice(0, -1).join("/") || ".", { recursive: true });
   writeFileSync(FILE, JSON.stringify(h));
 
