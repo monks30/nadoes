@@ -2,13 +2,19 @@
 // Records, for every player on every fantasy roster, their NFL injury status,
 // logs each change, adds up injury days per team, keeps a weekly snapshot,
 // and freezes the status of players in each new waiver / free-agent / trade move.
-// Writes data/nadoes-history.json. Needs Node 20+ (built-in fetch). No packages.
+// Also saves this week's player projections, scored with the league's own settings,
+// and locks a pre-kickoff copy each Sunday so the page can compare projected v actual.
+// Writes data/nadoes-history.json and data/nadoes-projections.json.
+// Needs Node 20+ (built-in fetch). No packages.
 
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
 
 const LEAGUE = process.env.LEAGUE_ID || "1391256159565930496";
 const BASE = process.env.SLEEPER_BASE || "https://api.sleeper.app/v1";
 const FILE = process.env.HISTORY_FILE || "data/nadoes-history.json";
+const PROJ_FILE = process.env.PROJ_FILE || "data/nadoes-projections.json";
+const COM_BASE = process.env.SLEEPER_COM_BASE || "https://api.sleeper.com";
+const PROJ_MIN = 150;     // a projection set needs at least this many players to count as complete
 const NOW = process.env.FAKE_NOW ? Number(process.env.FAKE_NOW) : Date.now();
 const DAY = 86400000;
 const SNAP_DAYS = 3;      // a move is frozen only if first seen within this many days
@@ -23,10 +29,69 @@ const BLOCKED = new Set(["__proto__", "constructor", "prototype"]);
 const okId = v => { const k = String(v); return ID.test(k) && !BLOCKED.has(k); };
 const clean = (v, n) => String(v == null ? "" : v).replace(/[<>&"'`\\]/g, "").slice(0, n);
 
-async function get(path) {
-  const res = await fetch(BASE + path, { signal: AbortSignal.timeout(TIMEOUT_MS) });
-  if (!res.ok) throw new Error(`HTTP ${res.status} on ${path}`);
+async function getUrl(url) {
+  const res = await fetch(url, { signal: AbortSignal.timeout(TIMEOUT_MS) });
+  if (!res.ok) throw new Error(`HTTP ${res.status} on ${url.replace(/\?.*/, "")}`);
   return res.json();
+}
+const get = path => getUrl(BASE + path);
+
+// ---- projections: score Sleeper's projected stats with the league's scoring settings ----
+// Points-allowed and yards-allowed come as a single number in projections, but leagues
+// score them in bands (e.g. 14-20 points allowed = 4), so map the number to its band.
+function band(sc, prefix, v) {
+  if (!Number.isFinite(v)) return 0;
+  const x = Math.round(v);
+  for (const [k, pts] of Object.entries(sc)) {
+    if (!k.startsWith(prefix + "_")) continue;
+    const r = k.slice(prefix.length + 1);
+    let lo, hi;
+    if (/^\d+p$/.test(r)) { lo = Number(r.slice(0, -1)); hi = Infinity; }
+    else if (/^\d+_\d+$/.test(r)) { [lo, hi] = r.split("_").map(Number); }
+    else if (/^\d+$/.test(r)) { lo = hi = Number(r); }
+    else continue;
+    if (x >= lo && x <= hi) return Number(pts) || 0;
+  }
+  return 0;
+}
+function scoreStats(st, sc) {
+  let pts = 0, hasPA = false, hasYA = false;
+  for (const [k, raw] of Object.entries(st)) {
+    const v = Number(raw);
+    if (!Number.isFinite(v)) continue;
+    if (k.startsWith("pts_allow_")) hasPA = true;
+    if (k.startsWith("yds_allow_")) hasYA = true;
+    if (Object.prototype.hasOwnProperty.call(sc, k)) pts += v * (Number(sc[k]) || 0);
+  }
+  if (!hasPA && st.pts_allow != null) pts += band(sc, "pts_allow", Number(st.pts_allow));
+  if (!hasYA && st.yds_allow != null) pts += band(sc, "yds_allow", Number(st.yds_allow));
+  if (pts <= 0 && Number(st.pts_ppr) > 0) pts = Number(st.pts_ppr);   // last resort
+  return pts;
+}
+function normProj(raw) {   // both feeds -> { player_id: stats }
+  const out = {};
+  if (Array.isArray(raw)) { for (const e of raw) if (e && okId(e.player_id) && e.stats && typeof e.stats === "object") out[e.player_id] = e.stats; }
+  else if (raw && typeof raw === "object") { for (const [pid, st] of Object.entries(raw)) if (okId(pid) && st && typeof st === "object") out[pid] = st; }
+  return out;
+}
+async function getProjections(season, week, sc) {
+  const pos = ["QB", "RB", "WR", "TE", "K", "DEF"].map(p => `position[]=${p}`).join("&");
+  const feeds = [
+    ["v1", () => get(`/projections/nfl/regular/${season}/${week}`)],
+    ["app", () => getUrl(`${COM_BASE}/projections/nfl/${season}/${week}?season_type=regular&${pos}`)],
+  ];
+  for (const [src, fetchIt] of feeds) {
+    try {
+      const pts = {}; let n = 0;
+      for (const [pid, st] of Object.entries(normProj(await fetchIt()))) {
+        const v = scoreStats(st, sc);
+        if (v > 0.05) { pts[pid] = Math.round(v * 100) / 100; if (/^\d+$/.test(pid)) n++; }
+      }
+      if (n >= PROJ_MIN) return { src, pts, n };
+      console.log(`Projections from ${src} look incomplete (${n} players); not used.`);
+    } catch (e) { console.log(`Projections from ${src} failed: ${e.message}`); }
+  }
+  return null;
 }
 
 // Same grouping the page uses.
@@ -77,7 +142,8 @@ async function main() {
   const elapsed = h.lastRun ? Math.min(7, Math.max(1, Math.round((NOW - h.lastRun) / DAY))) : 1;
   const own = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
   const status = pid => { const p = own(players, pid) ? players[pid] : null;
-    return p ? { s: norm(p.injury_status), part: clean(p.injury_body_part, 40) } : { s: "", part: "" }; };
+    const start = p ? Date.parse(p.injury_start_date || "") : NaN;
+    return p ? { s: norm(p.injury_status), part: clean(p.injury_body_part, 40), start: (start > 0 && start < NOW) ? start : null } : { s: "", part: "", start: null }; };
   const remember = pid => { const p = own(players, pid) ? players[pid] : null;
     if (p && !own(h.names, pid)) h.names[pid] = [clean(p.full_name || `${p.first_name || ""} ${p.last_name || ""}`.trim(), 60), clean(p.position, 6)]; };
 
@@ -90,14 +156,15 @@ async function main() {
   }
 
   for (const [pid, rid] of Object.entries(rostered)) {
-    const { s, part } = status(pid);
+    const { s, part, start } = status(pid);
     const prev = h.current[pid];
     if (!prev) {
       if (s) {
         // Healthy and on a roster at the last run, injured now: a new injury.
         // Picked up already injured: start tracking, but it is not a change.
         if (!seeding && h.rostered && (pid in h.rostered)) h.log.push([NOW, pid, rid, "", s, part]);
-        h.current[pid] = { s, p: part, rid, since: NOW }; remember(pid);
+        // Sleeper's own injury start date, when given, is better than "first seen today".
+        h.current[pid] = { s, p: part, rid, since: start || NOW }; remember(pid);
       }
     } else if (prev.s !== s) {
       h.log.push([NOW, pid, rid, prev.s, s, part]);
@@ -159,6 +226,25 @@ async function main() {
   h.lastRun = NOW;
   mkdirSync(FILE.split("/").slice(0, -1).join("/") || ".", { recursive: true });
   writeFileSync(FILE, JSON.stringify(h));
+
+  // 4. Projections. Never fatal: if both feeds are down or blank, the last good copy stays.
+  if (week) {
+    let P = existsSync(PROJ_FILE) ? JSON.parse(readFileSync(PROJ_FILE, "utf8")) : null;
+    if (!P || P.season !== String(league.season)) P = { v: 1, season: String(league.season), weeks: {}, locked: {} };
+    const dow = new Date(NOW).getUTCDay();          // 0 = Sunday, 1 = Monday (UTC)
+    // Missed the Sunday run? Lock Saturday's copy on Monday, before anything is refreshed.
+    if (dow === 1 && !P.locked[week] && P.weeks[week]) P.locked[week] = { at: P.weeks[week].at, pts: P.weeks[week].pts };
+    // No refresh on Mondays: games are under way and feeds change mid-game.
+    if (dow !== 1) {
+      const got = await getProjections(String(league.season), week, league.scoring_settings || {});
+      if (got) { P.weeks[week] = { at: NOW, src: got.src, pts: got.pts }; console.log(`Projections saved: ${got.n} players from ${got.src}.`); }
+    }
+    // Sunday 16:00 UTC is before the early games: lock this copy for projected-v-actual.
+    if (dow === 0 && !P.locked[week] && P.weeks[week]) P.locked[week] = { at: P.weeks[week].at, pts: P.weeks[week].pts };
+    for (const w of Object.keys(P.weeks)) if (Number(w) < week) delete P.weeks[w];
+    mkdirSync(PROJ_FILE.split("/").slice(0, -1).join("/") || ".", { recursive: true });
+    writeFileSync(PROJ_FILE, JSON.stringify(P));
+  }
   const injured = Object.keys(h.current).length;
   console.log(`Week ${week}: ${injured} rostered players injured, ${h.log.length} changes logged, ${frozen} new moves frozen.`);
 }
