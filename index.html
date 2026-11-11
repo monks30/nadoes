@@ -340,6 +340,14 @@
       </div>
     </div>
 
+    <div class="sec-title">Export for analysis</div>
+    <div class="panel">
+      <p class="note" style="margin-top:0">CSV files to drop into a chat, the project or a spreadsheet. <b>Rosters</b> = every player on every fantasy team. <b>Available</b> = every player at a fantasy position who is not on a roster, with this week's projection and how many Sleeper leagues are adding him. Copy is quickest on a phone: paste it straight into a chat.</p>
+      <div class="bar"><button id="expRostersDl">Download rosters</button><button id="expRostersCp" class="sec">Copy rosters</button></div>
+      <div class="bar"><button id="expAvailDl">Download available</button><button id="expAvailCp" class="sec">Copy available</button></div>
+      <div class="status" id="expStatus" style="margin-bottom:0"></div>
+    </div>
+
     <div class="sec-title">If the fetch fails</div>
     <div class="panel" style="font-size:13px">
       <p>Sleeper's read API is public, so the usual cause is your browser blocking a request made from a double-clicked file (a <code>file://</code> address). Two fixes:</p>
@@ -1619,6 +1627,90 @@
     renderWeekly(); refreshMatchups();
   }
 
+  // ---------- exports: rosters and available players as CSV ----------
+  function plain(v){ return String(v==null?"":v).replace(/&lt;/g,"<").replace(/&gt;/g,">").replace(/&quot;/g,'"').replace(/&#39;/g,"'").replace(/&amp;/g,"&"); }
+  function csvCell(v){
+    if(typeof v==="number") return isFinite(v)?String(Math.round(v*100)/100):"";
+    let x=plain(v);
+    if(/^[=+\-@\t\r]/.test(x)) x="'"+x;          // stop a spreadsheet treating text as a formula
+    return /[",\n\r]/.test(x) ? '"'+x.replace(/"/g,'""')+'"' : x;
+  }
+  function toCsv(head, rows){ return [head.join(",")].concat(rows.map(r=>head.map(h=>csvCell(r[h])).join(","))).join("\n"); }
+  async function prepExports(){
+    const st=$("expStatus");
+    if(!STATE){ st.textContent="Load the league first: hit Refresh from Sleeper on the Projections tab."; st.className="status err"; return false; }
+    st.className="status"; st.textContent="Gathering rosters, player file, projections and trends…";
+    const box=document.createElement("div");
+    if(!(await prepMoves(box,false))){ st.textContent=box.textContent||"Could not load transactions."; st.className="status err"; return false; }
+    if(!PROJ) await loadProjections(false);
+    if(!TREND.adds) await loadTrending(TREND.hours);
+    return true;
+  }
+  function weekRow(rid){ return ((STATE.matchups[STATE.currentWeek])||[]).find(x=>x.roster_id===rid)||null; }
+  function buildRosterRows(){
+    const skip={BN:1,IR:1,TAXI:1}; const codes=(STATE.rosterPositions||[]).filter(c=>!skip[c]);
+    const P=(PROJ&&PROJ.pts)||{}; const meta=(MOVES_CALC&&MOVES_CALC.meta)||{};
+    // points scored for fantasy teams across finished weeks, by player
+    const sc={};
+    STATE.completedWeeks.forEach(w=>(STATE.matchups[w]||[]).forEach(row=>{
+      const pp=row.players_points||{}, starters=row.starters||[];
+      (row.players||[]).forEach(pid=>{ const x=(sc[pid]=sc[pid]||{pts:0,wks:0,spts:0,swks:0}); x.pts+=Number(pp[pid])||0; x.wks++;
+        if(starters.indexOf(pid)>=0){ x.spts+=Number(pp[pid])||0; x.swks++; } }); }));
+    const rows=[];
+    STATE.teams.forEach(t=>{
+      const row=weekRow(t.rid), ir={}; (t.reserve||[]).forEach(p=>ir[p]=1);
+      const T=MOVES_CALC && MOVES_CALC.teams.find(x=>x.rid===t.rid); const ten={}; ((T&&T.roster)||[]).forEach(p=>ten[p.pid]=p);
+      (t.players||[]).forEach(pid=>{
+        const n=(NAMES&&NAMES[pid])||null, info=playerInfo(pid, meta), j=injOf(pid), si=row?(row.starters||[]).indexOf(pid):-1, x=sc[pid]||{}, tp=ten[pid]||{};
+        rows.push({season:STATE.season, week:STATE.currentWeek, fantasy_team:t.name, roster_id:t.rid, my_team:mineMatch(t.name)?"Y":"N",
+          slot: ir[pid]?"IR":(si>=0?(codes[si]||"Starter"):"BN"), sleeper_id:pid, player:info.n, position:info.p||(n?n[1]:""), nfl_team:n?n[4]:"",
+          injury_status:j?j.k:"", injury_detail:n?n[3]:"", injury_since:(n&&n[5])?new Date(n[5]).toISOString().slice(0,10):"",
+          proj_this_week:P[pid]!=null?P[pid]:"", pts_while_rostered:x.pts!=null?x.pts:0, weeks_rostered:x.wks||0, pts_as_starter:x.spts!=null?x.spts:0, weeks_started:x.swks||0,
+          acquired:tp.via||"", days_on_roster:tp.days!=null?Math.round(tp.days):""});
+      });
+    });
+    const order={QB:1,RB:2,WR:3,TE:4,K:5,DEF:6};
+    rows.sort((a,b)=>String(a.fantasy_team).localeCompare(String(b.fantasy_team)) || (a.slot==="BN")-(b.slot==="BN") || (a.slot==="IR")-(b.slot==="IR") || (order[a.position]||9)-(order[b.position]||9));
+    return rows;
+  }
+  function buildAvailRows(){
+    const P=(PROJ&&PROJ.pts)||{}; const rostered={}; STATE.teams.forEach(t=>(t.players||[]).forEach(p=>rostered[p]=1));
+    const adds={}, drops={}; (TREND.adds||[]).forEach(x=>{ if(x) adds[x.player_id]=x.count; }); (TREND.drops||[]).forEach(x=>{ if(x) drops[x.player_id]=x.count; });
+    const POS={QB:1,RB:1,WR:1,TE:1,K:1,DEF:1}; const rows=[];
+    for(const pid in (NAMES||{})){
+      const n=NAMES[pid]; if(rostered[pid] || !POS[n[1]] || !n[4]) continue;             // fantasy position, on an NFL team, not rostered
+      if(P[pid]==null && adds[pid]==null && PROJ) continue;                                 // with projections loaded, skip players with no projection and no trend
+      const j=injOf(pid);
+      rows.push({season:STATE.season, week:STATE.currentWeek, sleeper_id:pid, player:n[0], position:n[1], nfl_team:n[4],
+        injury_status:j?j.k:"", injury_detail:n[3]||"", proj_this_week:P[pid]!=null?P[pid]:"",
+        ["adds_last_"+TREND.hours+"h"]:adds[pid]||0, ["drops_last_"+TREND.hours+"h"]:drops[pid]||0});
+    }
+    rows.sort((a,b)=>(Number(b.proj_this_week)||0)-(Number(a.proj_this_week)||0) || (b["adds_last_"+TREND.hours+"h"]-a["adds_last_"+TREND.hours+"h"]));
+    return rows.slice(0,800);
+  }
+  async function runExport(kind, mode){
+    const st=$("expStatus");
+    if(!(await prepExports())) return;
+    let rows, head, name;
+    if(kind==="rosters"){ rows=buildRosterRows(); head=["season","week","fantasy_team","roster_id","my_team","slot","sleeper_id","player","position","nfl_team","injury_status","injury_detail","injury_since","proj_this_week","pts_while_rostered","weeks_rostered","pts_as_starter","weeks_started","acquired","days_on_roster"]; }
+    else { rows=buildAvailRows(); head=["season","week","sleeper_id","player","position","nfl_team","injury_status","injury_detail","proj_this_week","adds_last_"+TREND.hours+"h","drops_last_"+TREND.hours+"h"]; }
+    name="nadoes-"+kind+"-"+STATE.season+"-wk"+STATE.currentWeek+".csv";
+    const csv=toCsv(head, rows);
+    const note=rows.length+" players"+(PROJ?"":" (no projections loaded, so the projection column is blank)");
+    if(mode==="download"){
+      const url=URL.createObjectURL(new Blob([csv],{type:"text/csv;charset=utf-8"}));
+      const a=document.createElement("a"); a.href=url; a.download=name; document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(()=>URL.revokeObjectURL(url), 4000);
+      st.className="status ok"; st.textContent="Downloaded "+name+": "+note+".";
+    } else {
+      let ok=false;
+      try{ await navigator.clipboard.writeText(csv); ok=true; }catch(e){
+        const ta=document.createElement("textarea"); ta.value=csv; ta.style.position="fixed"; ta.style.opacity="0"; document.body.appendChild(ta); ta.select();
+        try{ ok=document.execCommand("copy"); }catch(_){ } ta.remove(); }
+      st.className="status "+(ok?"ok":"err"); st.textContent=ok?("Copied "+note+". Paste it into a chat or spreadsheet."):"Copy was blocked by the browser. Use Download instead.";
+    }
+  }
+
   function doSim(){
     if(!STATE){ return; }
     saveCfg();
@@ -1723,6 +1815,10 @@
   $("simBtn").addEventListener("click", doSim);
   $("adminRunBtn").addEventListener("click", ()=>{ showTab("main"); doSim(); });
   $("adminFetchBtn").addEventListener("click", ()=>{ showTab("main"); fetchNow(); });
+  $("expRostersDl").addEventListener("click", ()=>runExport("rosters","download"));
+  $("expRostersCp").addEventListener("click", ()=>runExport("rosters","copy"));
+  $("expAvailDl").addEventListener("click", ()=>runExport("available","download"));
+  $("expAvailCp").addEventListener("click", ()=>runExport("available","copy"));
   ["leagueId","myTeam","nSims","kVal","sdVal"].forEach(idv=>$(idv).addEventListener("change", saveCfg));
 
   loadCfg();
